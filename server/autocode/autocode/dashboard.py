@@ -86,7 +86,6 @@ while True:
         query = select(Cache).where(Cache.key.startswith("results"))
         result_caches: Set[Cache] = set(session.exec(query).all())
         diff_result_caches = set(result_caches) - set(st.session_state["old_result_caches"])
-        print(len(result_caches), len(diff_result_caches))
     except Exception as e:
         print(e)
         time.sleep(0.01)

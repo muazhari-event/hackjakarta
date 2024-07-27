@@ -6,7 +6,7 @@ from autocode.datastore import OneDatastore
 from autocode.gateway import EvaluationGateway
 from autocode.router import ApiRouter
 from autocode.setting import ApplicationSetting
-from autocode.use_case import OptimizationUseCase
+from autocode.use_case import OptimizationUseCase, LlmUseCase
 
 
 class SettingContainer(DeclarativeContainer):
@@ -32,8 +32,14 @@ class UseCaseContainer(DeclarativeContainer):
     gateways = providers.DependenciesContainer()
     datastores = providers.DependenciesContainer()
 
+    llm = providers.Singleton(
+        LlmUseCase,
+        application_setting=settings.application
+    )
+
     optimization = providers.Singleton(
         OptimizationUseCase,
+        llm_use_case=llm,
         evaluation_gateway=gateways.evaluation,
         one_datastore=datastores.one,
         application_setting=settings.application

@@ -420,7 +420,8 @@ func (self *Optimization) Prepare() {
 					var newOptionData any
 					if optionType == VALUE_FUNCTION {
 						data := option.(map[string]any)["data"].(map[string]any)
-						functionName := data["name"].(string)
+						functionNameSegments := strings.Split(data["name"].(string), ".")
+						functionName := functionNameSegments[len(functionNameSegments)-1]
 						functionString := data["string"].(string)
 						self.Interpreter.Eval(functionString)
 						function, _ := self.Interpreter.Eval1(functionName)

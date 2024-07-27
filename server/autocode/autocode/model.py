@@ -1,16 +1,17 @@
 import hashlib
 import uuid
-from typing import Optional, Any, List, Dict, Tuple
+from typing import Optional, Any, List, Dict, Tuple, TypedDict
 
 import dill
 import numpy as np
-from pydantic import BaseModel as PydanticBaseModel, ConfigDict, Field
-from pydantic import PrivateAttr
+from pydantic import BaseModel as PydanticBaseModelV2, ConfigDict, Field, PrivateAttr
 from pymoo.core.plot import Plot
 from sqlmodel import SQLModel, Field as SQLField
 
+from pydantic.v1 import BaseModel as BaseModelV1, Field as FieldV1
 
-class BaseModel(PydanticBaseModel):
+
+class BaseModel(PydanticBaseModelV2):
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         revalidate_instances="always",
@@ -18,6 +19,45 @@ class BaseModel(PydanticBaseModel):
         validate_return=True,
         validate_assignment=True,
     )
+
+
+class CodeScoring(BaseModelV1):
+    """
+    Score code in based on the following statements:
+    Error Potential - this code is potentially error-prone;
+    Readability - this code is easy to read;
+    Understandability - the semantic meaning of this code is clear;
+    Complexity - this code is complex;
+    Modularity  - this code should be broken into smaller pieces;
+    Overall maintainability - overall, this code is maintainable.
+    The score scale from 1 (strongly agree) to 100 (strongly disagree).
+    You must score in precision, i.e. 14.3, 47.456, 75.45, 58.58495, 3.141598, etc.
+    """
+    error_potential: float = FieldV1(description="Error potential score.")
+    readability: float = FieldV1(description="Readability score.")
+    understandability: float = FieldV1(description="Understandability score.")
+    complexity: float = FieldV1(description="Complexity score.")
+    modularization: float = FieldV1(description="Modularity score.")
+    overall_maintainability: float = FieldV1(description="Overall maintainability score.")
+
+
+class CodeVariation(BaseModelV1):
+    """
+    Code variation is a code snippet that is a variation of the original code.
+    """
+    variation: Optional[str] = FieldV1(description="Code variation.", default=None)
+
+
+class ScoringState(TypedDict):
+    code: str
+    analysis: str
+    score: List[CodeScoring]
+
+
+class VariationState(TypedDict):
+    code: str
+    analysis: str
+    variation: List[CodeVariation]
 
 
 class OptimizationVariable(BaseModel):
@@ -36,9 +76,11 @@ class OptimizationVariable(BaseModel):
 class OptimizationValueFunction(BaseModel):
     name: str
     string: str
+    error_potential: Optional[int] = Field(default=None)
     understandability: Optional[int] = Field(default=None)
     complexity: Optional[int] = Field(default=None)
     maintainability: Optional[int] = Field(default=None)
+    modularization: Optional[int] = Field(default=None)
     overall_maintainability: Optional[int] = Field(default=None)
 
 

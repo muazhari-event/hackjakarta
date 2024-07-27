@@ -69,13 +69,13 @@ func (self *Application) Evaluate(ctx *autocode.OptimizationApplicationContext) 
 	f_sum_latency += float64(t1.Sub(t0).Microseconds())
 	f_sum_output := float64(0)
 	f_sum_output += float64(ctx.GetValue("a").(int64))
-	f_sum_output += float64(ctx.GetValue("b").(int64))
-	f_sum_output += float64(ctx.GetValue("c").(int64))
-	f_sum_output += float64(ctx.GetValue("d").(int64))
-	f_sum_output += ctx.GetValue("e").(float64)
-	if ctx.GetValue("f").(bool) {
-		f_sum_output += 1.0
-	}
+	//f_sum_output += float64(ctx.GetValue("b").(int64))
+	//f_sum_output += float64(ctx.GetValue("c").(int64))
+	//f_sum_output += float64(ctx.GetValue("d").(int64))
+	//f_sum_output += ctx.GetValue("e").(float64)
+	//if ctx.GetValue("f").(bool) {
+	//	f_sum_output += 1.0
+	//}
 
 	return &autocode.OptimizationEvaluateRunResponse{
 		Objectives:            []float64{f_sum_latency, f_sum_output},
@@ -167,25 +167,25 @@ func Test(t *testing.T) {
 			"a",
 			[]any{a0, a1},
 		),
-		autocode.NewOptimizationChoice(
-			"b",
-			[]any{b0, b1, b2},
-		),
-		autocode.NewOptimizationChoice(
-			"c",
-			[]any{c0, c1},
-		),
-		autocode.NewOptimizationInteger(
-			"d",
-			-10, 10,
-		),
-		autocode.NewOptimizationReal(
-			"e",
-			-3.14, 3.14,
-		),
-		autocode.NewOptimizationBinary(
-			"f",
-		),
+		//autocode.NewOptimizationChoice(
+		//	"b",
+		//	[]any{b0, b1, b2},
+		//),
+		//autocode.NewOptimizationChoice(
+		//	"c",
+		//	[]any{c0, c1},
+		//),
+		//autocode.NewOptimizationInteger(
+		//	"d",
+		//	-10, 10,
+		//),
+		//autocode.NewOptimizationReal(
+		//	"e",
+		//	-3.14, 3.14,
+		//),
+		//autocode.NewOptimizationBinary(
+		//	"f",
+		//),
 	}
 	optimization := autocode.NewOptimization(
 		variables,

@@ -1,9 +1,15 @@
 import asyncio
+import copy
 import uuid
 from typing import Dict, List, Callable, Any, Coroutine
 
 import dill
 import numpy as np
+from langchain_core.output_parsers import PydanticToolsParser
+from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate, \
+    AIMessagePromptTemplate
+from langchain_openai import ChatOpenAI
+from langgraph.graph import StateGraph
 from pymoo.algorithms.moo.sms import SMSEMOA
 from pymoo.core.algorithm import Algorithm
 from pymoo.core.callback import Callback
@@ -24,7 +30,8 @@ from autocode.gateway import EvaluationGateway
 from autocode.model import OptimizationPrepareRequest, OptimizationChoice, OptimizationBinary, \
     OptimizationInteger, OptimizationReal, OptimizationVariable, OptimizationClient, OptimizationEvaluateRunRequest, \
     OptimizationValue, OptimizationEvaluatePrepareRequest, OptimizationEvaluateRunResponse, OptimizationObjective, \
-    OptimizationInterpretation, OptimizationPrepareResponse, Cache
+    OptimizationInterpretation, OptimizationPrepareResponse, Cache, OptimizationValueFunction, CodeScoring, \
+    ScoringState, CodeVariation, VariationState
 from autocode.setting import ApplicationSetting
 
 from ray.util.queue import Queue
@@ -168,13 +175,178 @@ class OptimizationProblem(ElementwiseProblem):
         out.update(evaluator_output)
 
 
+class LlmUseCase:
+    def __init__(
+            self,
+            application_setting: ApplicationSetting
+    ):
+        self.application_setting = application_setting
+        self.scoring_graph = self.get_scoring_graph()
+        self.variation_graph = self.get_variation_graph()
+
+    def get_scoring_graph(self):
+        chat = ChatOpenAI(
+            model="gpt-4o-mini",
+            api_key=self.application_setting.open_api_key
+        )
+
+        tools = [CodeScoring]
+        parser = PydanticToolsParser(tools=tools)
+
+        def node_scoring_analyze(state: ScoringState):
+            prompt = ChatPromptTemplate.from_messages([
+                SystemMessagePromptTemplate.from_template("""
+                    You are target group of our study. The target group of our study are software quality analysts, researchers with a background in software quality, and software engineers that are involved with maintaining software. Some participants have up to 15 years of experience in quality assessments. In sum, 70 professionals participated. First, we invited selected experts to participate in the study. Second, we asked them to disseminate the study to interested and qualified colleagues. The survey was also promoted in relevant net- works. The participants are affiliated with companies including Airbus, Audi, BMW, Boston Consulting Group, Celonis, cesdo Software Quality GmbH, CQSE GmbH, Facebook, fortiss, itestra GmbH, Kinexon GmbH, MaibornWolff GmbH, Munich Re, Oracle, and three universities. However, 7 participants did not want to share their affiliation. During the study, we followed a systematic approach to assess software maintainability. The following steps were taken:
+                    """),
+                HumanMessagePromptTemplate.from_template("""
+                    Analyze readability, understandability, complexity, modularity, and overall maintainability metrics of the following code.
+                    You must use step by step comprehensive reasoning to explain your analysis.
+                    <code>
+                    {code}
+                    </code>
+                    """),
+            ])
+            chain = prompt | chat
+            response = chain.invoke({
+                "code": state["code"],
+            })
+            state["analysis"] = response.content
+            return state
+
+        def node_scoring(state: ScoringState):
+            prompt = ChatPromptTemplate.from_messages([
+                SystemMessagePromptTemplate.from_template("""
+                        You are target group of our study. The target group of our study are software quality analysts, researchers with a background in software quality, and software engineers that are involved with maintaining software. Some participants have up to 15 years of experience in quality assessments. In sum, 70 professionals participated. First, we invited selected experts to participate in the study. Second, we asked them to disseminate the study to interested and qualified colleagues. The survey was also promoted in relevant networks. The participants are affiliated with companies including Airbus, Audi, BMW, Boston Consulting Group, Celonis, cesdo Software Quality GmbH, CQSE GmbH, Facebook, fortiss, itestra GmbH, Kinexon GmbH, MaibornWolff GmbH, Munich Re, Oracle, and three universities. However, 7 participants did not want to share their affiliation. During the study, we followed a systematic approach to assess software maintainability. The following steps were taken:
+                        """),
+                HumanMessagePromptTemplate.from_template("""
+                        Analyze error potential, readability, understandability, complexity, modularity, and overall maintainability metrics of the following code.
+                        You must use step by step comprehensive reasoning to explain your analysis.
+                        <code>
+                        {code}
+                        </code>
+                        """),
+                AIMessagePromptTemplate.from_template("""
+                        {analysis}
+                        """),
+                HumanMessagePromptTemplate.from_template("""
+                        Based on your analysis and the provided code, score the code based on the following criteria:
+                        Error potential - this code is potentially error-prone;
+                        Readability - this code is easy to read; 
+                        Understandability - the semantic meaning of this code is clear; 
+                        Complexity - this code is complex; 
+                        Modularity  - this code should be broken into smaller pieces; 
+                        Overall maintainability - overall, this code is maintainable. 
+                        The score scale from -1000000 (strongly agree) to 1000000 (strongly disagree).
+                        You must score in precision, i.e. 14952, -475.456, 757850, 584.58495, 3.141598, etc.
+                        """),
+            ])
+            chain = prompt | chat.bind_tools(tools=tools) | parser
+            response = chain.invoke({
+                "code": state["code"],
+                "analysis": state["analysis"]
+            })
+            state["score"] = response
+            return state
+
+        graph = StateGraph(ScoringState)
+        graph.set_entry_point(node_scoring_analyze.__name__)
+        graph.add_node(node_scoring_analyze.__name__, node_scoring_analyze)
+        graph.add_node(node_scoring.__name__, node_scoring)
+        graph.add_edge(node_scoring_analyze.__name__, node_scoring.__name__)
+        graph.set_finish_point(node_scoring.__name__)
+        compiled_graph = graph.compile()
+
+        return compiled_graph
+
+    def get_variation_graph(self):
+        chat = ChatOpenAI(
+            model="gpt-4o-mini",
+            api_key=self.application_setting.open_api_key
+        )
+
+        tools = [CodeVariation]
+        parser = PydanticToolsParser(tools=tools)
+
+        def node_variation_analyze(state: VariationState):
+            prompt = ChatPromptTemplate.from_messages([
+                SystemMessagePromptTemplate.from_template("""
+            You are target group of our study. The target group of our study are software quality analysts, researchers with a background in software quality, and software engineers that are involved with maintaining software. Some participants have up to 15 years of experience in quality assessments. In sum, 70 professionals participated. First, we invited selected experts to participate in the study. Second, we asked them to disseminate the study to interested and qualified colleagues. The survey was also promoted in relevant net- works. The participants are affiliated with companies including Airbus, Audi, BMW, Boston Consulting Group, Celonis, cesdo Software Quality GmbH, CQSE GmbH, Facebook, fortiss, itestra GmbH, Kinexon GmbH, MaibornWolff GmbH, Munich Re, Oracle, and three universities. However, 7 participants did not want to share their affiliation. During the study, we followed a systematic approach to assess software maintainability. The following steps were taken:
+            """),
+                HumanMessagePromptTemplate.from_template("""
+            Analyze the following code to propose many possible variations.
+            <code>
+            {code}
+            </code>
+            """),
+            ])
+            chain = prompt | chat
+            response = chain.invoke({
+                "code": state["code"],
+            })
+            state["analysis"] = response.content
+            return state
+
+        def node_variation(state: VariationState):
+            prompt = ChatPromptTemplate.from_messages([
+                SystemMessagePromptTemplate.from_template("""
+                You are target group of our study. The target group of our study are software quality analysts, researchers with a background in software quality, and software engineers that are involved with maintaining software. Some participants have up to 15 years of experience in quality assessments. In sum, 70 professionals participated. First, we invited selected experts to participate in the study. Second, we asked them to disseminate the study to interested and qualified colleagues. The survey was also promoted in relevant networks. The participants are affiliated with companies including Airbus, Audi, BMW, Boston Consulting Group, Celonis, cesdo Software Quality GmbH, CQSE GmbH, Facebook, fortiss, itestra GmbH, Kinexon GmbH, MaibornWolff GmbH, Munich Re, Oracle, and three universities. However, 7 participants did not want to share their affiliation. During the study, we followed a systematic approach to assess software maintainability. The following steps were taken:
+                """),
+                HumanMessagePromptTemplate.from_template("""
+                Analyze the following code to propose many possible variations.
+                <code>
+                {code}
+                </code>
+                """),
+                AIMessagePromptTemplate.from_template("""
+                {analysis}
+                """),
+                HumanMessagePromptTemplate.from_template("""
+                Generate 1 variations of the following code using "CodeVariation" tools.
+                Do not change the function name and parameters.
+                """),
+            ])
+            chain = prompt | chat.bind_tools(tools=tools) | parser
+            response = chain.invoke({
+                "code": state["code"],
+                "analysis": state["analysis"]
+            })
+            state["variation"] = response
+            return state
+
+        graph = StateGraph(VariationState)
+        graph.set_entry_point(node_variation_analyze.__name__)
+        graph.add_node(node_variation_analyze.__name__, node_variation_analyze)
+        graph.add_node(node_variation.__name__, node_variation)
+        graph.add_edge(node_variation_analyze.__name__, node_variation.__name__)
+        graph.set_finish_point(node_variation.__name__)
+        compiled_graph = graph.compile()
+
+        return compiled_graph
+
+    async def function_scoring(self, function: OptimizationValueFunction) -> List[CodeScoring]:
+        state: ScoringState = await self.scoring_graph.ainvoke({
+            "code": function.string
+        })
+
+        return state["score"]
+
+    async def generate_function_variation(self, function: OptimizationValueFunction) -> List[CodeVariation]:
+        state: VariationState = await self.variation_graph.ainvoke({
+            "code": function.string
+        })
+
+        return state["variation"]
+
+
 class OptimizationUseCase:
     def __init__(
             self,
+            llm_use_case: LlmUseCase,
             evaluation_gateway: EvaluationGateway,
             one_datastore: OneDatastore,
             application_setting: ApplicationSetting
     ):
+        self.llm_use_case = llm_use_case
         self.evaluation_gateway = evaluation_gateway
         self.one_datastore = one_datastore
         self.application_setting = application_setting
@@ -187,8 +359,21 @@ class OptimizationUseCase:
             name=request.name
         )
 
-        for variable in client.variables.values():
+        dict_variation_futures: Dict[str, Coroutine] = {}
+
+
+        for variable_id, variable in client.variables.items():
             variable.set_client_id(client.id)
+
+            if type(variable) is OptimizationChoice:
+                for option_id, option in variable.options.items():
+                    if option.type == "function":
+                        future_variation: Coroutine = self.llm_use_case.generate_function_variation(option.data)
+                        dict_variation_futures[option_id] = future_variation
+
+        list_variation_futures: List[List[CodeVariation]] = list(dict_variation_futures.values())
+        list_variation = asyncio.get_event_loop().run_until_complete(asyncio.gather(*list_variation_futures))
+
 
         session: Session = self.one_datastore.get_session()
         client_cache: Cache = Cache(
