@@ -1,10 +1,19 @@
-from dependency_injector.containers import DeclarativeContainer
 from dependency_injector import providers
+from dependency_injector.containers import DeclarativeContainer
+
+from server.autocode.autocode.controller import OptimizationController, HealthController
+from server.autocode.autocode.datastore import OneDatastore
+from server.autocode.autocode.gateway import EvaluationGateway
+from server.autocode.autocode.router import ApiRouter
+from server.autocode.autocode.setting import ApplicationSetting
+from server.autocode.autocode.use_case import OptimizationUseCase
+
 
 class SettingContainer(DeclarativeContainer):
     application = providers.Singleton(
         ApplicationSetting
     )
+
 
 class GatewayContainer(DeclarativeContainer):
     settings = providers.DependenciesContainer()
@@ -79,4 +88,3 @@ class MainContainer(DeclarativeContainer):
         RouterContainer,
         controllers=controllers
     )
-
