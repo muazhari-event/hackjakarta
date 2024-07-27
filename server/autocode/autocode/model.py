@@ -1,8 +1,10 @@
 import uuid
+from typing import Optional, Any, List, Dict, Tuple
 
 import numpy as np
 from pydantic.v1 import BaseModel as PydanticBaseModel, ConfigDict, Field
 from pydantic.v1 import PrivateAttr
+from pymoo.core.plot import Plot
 
 
 class BaseModel(PydanticBaseModel):
@@ -31,8 +33,8 @@ class OptimizationValueFunction(BaseModel):
 
 class OptimizationValue(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    type: str
-    data: Optional[Any | OptimizationValueFunction]
+    type: Optional[str]
+    data: Any | OptimizationValueFunction
 
     @staticmethod
     def convert_type(data: Any):

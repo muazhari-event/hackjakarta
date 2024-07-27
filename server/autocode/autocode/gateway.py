@@ -1,4 +1,5 @@
-from server.autocode.autocode.model import OptimizationEvaluatePrepareRequest, OptimizationClient
+from server.autocode.autocode.model import OptimizationEvaluatePrepareRequest, OptimizationClient, \
+    OptimizationEvaluateRunRequest
 
 
 class EvaluationGateway:
@@ -8,5 +9,5 @@ class EvaluationGateway:
     async def evaluate_prepare(self, client: OptimizationClient, request: OptimizationEvaluatePrepareRequest):
         pass
 
-    async def evaluate_run(self, client: OptimizationClient, request: OptimizationEvaluatePrepareRequest):
+    async def evaluate_run(self, client: OptimizationClient, request: OptimizationEvaluateRunRequest):
         pass
