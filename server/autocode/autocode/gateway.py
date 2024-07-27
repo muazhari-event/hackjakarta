@@ -1,5 +1,9 @@
+from http import HTTPStatus
+
+from httpx import AsyncClient, AsyncHTTPTransport
+
 from server.autocode.autocode.model import OptimizationEvaluatePrepareRequest, OptimizationClient, \
-    OptimizationEvaluateRunRequest
+    OptimizationEvaluateRunRequest, OptimizationEvaluateRunResponse
 
 
 class EvaluationGateway:
@@ -7,7 +11,33 @@ class EvaluationGateway:
         pass
 
     async def evaluate_prepare(self, client: OptimizationClient, request: OptimizationEvaluatePrepareRequest):
-        pass
+        client: AsyncClient = AsyncClient(
+            base_url=f"http://{client.host}:{client.port}/apis",
+            transport=AsyncHTTPTransport(retries=30)
+        )
+        response = await client.post(
+            url="/optimizations/evaluates/prepares",
+            json=request.json(),
+            timeout=None
+        )
+
+        if response.status_code != HTTPStatus.OK:
+            raise ValueError(f"Error: {response.json()}")
 
     async def evaluate_run(self, client: OptimizationClient, request: OptimizationEvaluateRunRequest):
-        pass
+        client: AsyncClient = AsyncClient(
+            base_url=f"http://{client.host}:{client.port}/apis",
+            transport=AsyncHTTPTransport(retries=30)
+        )
+        response = await client.post(
+            url="/optimizations/evaluates/runs",
+            json=request.json(),
+            timeout=None
+        )
+
+        if response.status_code != HTTPStatus.OK:
+            raise ValueError(f"Error: {response.json()}")
+
+        data: OptimizationEvaluateRunResponse = OptimizationEvaluateRunResponse(**response.json())
+
+        return data
