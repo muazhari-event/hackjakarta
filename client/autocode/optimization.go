@@ -1,17 +1,19 @@
 package autocode
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/cosmos72/gomacro/fast"
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"net/http"
+	"reflect"
 )
 
 const VARIABLE_BINARY = "OptimizationBinary"
 const VARIABLE_INTEGER = "OptimizationInteger"
 const VARIABLE_REAL = "OptimizationReal"
-const VARIABLE_BOOLEAN = "OptimizationBoolean"
 const VARIABLE_CHOICE = "OptimizationChoice"
 const VALUE_FUNCTION = "function"
 const VALUE_BOOLEAN = "boolean"
@@ -25,22 +27,108 @@ type OptimizationVariable struct {
 }
 
 type OptimizationBinary struct {
-	OptimizationVariable
+	*OptimizationVariable
+}
+
+func NewOptimizationBinary(name string) *OptimizationBinary {
+	return &OptimizationBinary{
+		OptimizationVariable: &OptimizationVariable{
+			Id:   uuid.NewString(),
+			Name: name,
+			Type: VARIABLE_BINARY,
+		},
+	}
 }
 
 type OptimizationInteger struct {
-	OptimizationVariable
+	*OptimizationVariable
 	Bounds [2]int64 `json:"bounds"`
 }
 
+func NewOptimizationInteger(name string, lowerBound int64, upperBound int64) *OptimizationInteger {
+	return &OptimizationInteger{
+		OptimizationVariable: &OptimizationVariable{
+			Id:   uuid.NewString(),
+			Name: name,
+			Type: VARIABLE_INTEGER,
+		},
+		Bounds: [2]int64{lowerBound, upperBound},
+	}
+}
+
 type OptimizationReal struct {
-	OptimizationVariable
+	*OptimizationVariable
 	Bounds [2]float64 `json:"bounds"`
 }
 
+func NewOptimizationReal(name string, lowerBound float64, upperBound float64) *OptimizationReal {
+	return &OptimizationReal{
+		OptimizationVariable: &OptimizationVariable{
+			Id:   uuid.NewString(),
+			Name: name,
+			Type: VARIABLE_REAL,
+		},
+		Bounds: [2]float64{lowerBound, upperBound},
+	}
+}
+
 type OptimizationChoice struct {
-	OptimizationVariable
-	Options []*OptimizationValue `json:"options"`
+	*OptimizationVariable
+	Options map[string]*OptimizationValue `json:"options"`
+}
+
+func getType(value any) string {
+	switch value.(type) {
+	case OptimizationBinary:
+		return VARIABLE_BINARY
+	case OptimizationInteger:
+		return VARIABLE_INTEGER
+	case OptimizationReal:
+		return VARIABLE_REAL
+	case OptimizationChoice:
+		return VARIABLE_CHOICE
+	case int64:
+		return VALUE_INTEGER
+	case float64:
+		return VALUE_REAL
+	case bool:
+		return VALUE_BOOLEAN
+	case FunctionValue:
+		return VALUE_FUNCTION
+	default:
+		panic("Unknown type")
+	}
+}
+
+func NewOptimizationChoice(name string, options []any) *OptimizationChoice {
+	transformedOptions := map[string]*OptimizationValue{}
+	for _, option := range options {
+		optionId := uuid.NewString()
+		optionType := getType(option)
+		if optionType == VALUE_FUNCTION {
+			option = &OptimizationFunctionValue{
+				Function:               option.(FunctionValue),
+				Complexity:             0,
+				ErrorPotential:         0,
+				Modularization:         0,
+				OverallMaintainability: 0,
+				Understandability:      0,
+			}
+		}
+		transformedOptions[optionId] = &OptimizationValue{
+			Id:   optionId,
+			Type: optionType,
+			Data: option,
+		}
+	}
+	return &OptimizationChoice{
+		OptimizationVariable: &OptimizationVariable{
+			Id:   uuid.NewString(),
+			Name: name,
+			Type: VARIABLE_CHOICE,
+		},
+		Options: transformedOptions,
+	}
 }
 
 type OptimizationValue struct {
@@ -78,7 +166,7 @@ type OptimizationApplicationContext struct {
 	Application            *OptimizationApplication
 }
 type Optimization struct {
-	Variables   []any
+	Variables   map[string]any
 	Application OptimizationApplication
 	ServerHost  string
 	ServerPort  int64
@@ -101,8 +189,13 @@ func NewOptimization(
 	clientName string,
 ) (optimization *Optimization) {
 	workers := make(map[string]*OptimizationApplicationContext)
+	transformedVariables := map[string]any{}
+	for _, variable := range variables {
+		variableId := getFieldValue(variable, "Id").(string)
+		transformedVariables[variableId] = variable
+	}
 	optimization = &Optimization{
-		Variables:   variables,
+		Variables:   transformedVariables,
 		Application: application,
 		ServerHost:  serverHost,
 		ServerPort:  serverPort,
@@ -118,8 +211,112 @@ func NewOptimization(
 	return optimization
 }
 
-func (self *Optimization) Prepare() {
+func getFieldValue(variable any, field string) (output any) {
+	reflectedVariable := reflect.ValueOf(variable)
+	fieldValue := reflectedVariable.FieldByName(field)
+	output = fieldValue.Interface()
+	return output
+}
 
+func (self *Optimization) Prepare() {
+	requestBody := &OptimizationPrepareRequest{
+		Variables: self.Variables,
+		Host:      self.ClientHost,
+		Port:      self.ClientPort,
+		Name:      self.ClientName,
+	}
+
+	requestBodyMap := requestBody.Map()
+	requestBodyJson, jsonErr := json.Marshal(requestBodyMap)
+	if jsonErr != nil {
+		panic(jsonErr)
+	}
+	bodyBuffer := bytes.NewBuffer(requestBodyJson)
+	client := &http.Client{
+		Timeout: 0,
+	}
+	url := fmt.Sprintf("%s/apis/optimizations/prepares", self.ServerUrl)
+	response, responseErr := client.Post(url, "application/json", bodyBuffer)
+	if responseErr != nil {
+		panic(responseErr)
+	}
+
+	if response.StatusCode != 200 {
+		panic("Failed to prepare")
+	}
+
+	responseBody := &OptimizationPrepareResponse{}
+	decodeErr := json.NewDecoder(response.Body).Decode(responseBody)
+	if decodeErr != nil {
+		panic(decodeErr)
+	}
+
+	for _, newVariable := range responseBody.Variables {
+		newVariableId := newVariable.(map[string]any)["id"].(string)
+		newVariableType := newVariable.(map[string]any)["type"].(string)
+		newVariableName := newVariable.(map[string]any)["name"].(string)
+		oldVariable, _ := self.Variables[newVariableId]
+		if newVariableType == VARIABLE_CHOICE {
+			oldOptions := getFieldValue(oldVariable, "Options").(map[string]*OptimizationValue)
+			newOptions := map[string]*OptimizationValue{}
+			for optionId, option := range newVariable.(map[string]any)["options"].(map[string]any) {
+				oldOption, isExists := oldOptions[optionId]
+				if isExists == true {
+					newOptions[optionId] = oldOption
+				} else {
+					optionType := option.(map[string]any)["type"].(string)
+					var newOptionData any
+					if optionType == VALUE_FUNCTION {
+						data := option.(map[string]any)["data"].(map[string]any)
+						functionName := data["name"].(string)
+						functionString := data["string"].(string)
+						self.Interpreter.Eval(functionString)
+						function, _ := self.Interpreter.Eval1(functionName)
+						newOptionData = &OptimizationFunctionValue{
+							Function:               function.Interface().(FunctionValue),
+							Complexity:             data["complexity"].(float64),
+							ErrorPotential:         data["error_potential"].(float64),
+							Modularization:         data["modularization"].(float64),
+							OverallMaintainability: data["overall_maintainability"].(float64),
+							Understandability:      data["understandability"].(float64),
+						}
+					} else {
+						panic(fmt.Sprintf("unsupported option type: %s", optionType))
+					}
+					newOptions[optionId] = &OptimizationValue{
+						Id:   optionId,
+						Type: optionType,
+						Data: newOptionData,
+					}
+				}
+			}
+			newChoice := &OptimizationChoice{
+				OptimizationVariable: &OptimizationVariable{
+					Id:   newVariableId,
+					Type: VARIABLE_CHOICE,
+					Name: newVariableName,
+				},
+				Options: newOptions,
+			}
+			self.Variables[newVariableId] = newChoice
+		}
+	}
+
+	for i := int64(0); i < responseBody.NumWorkers; i++ {
+		context := &OptimizationApplicationContext{
+			WorkerId:               "",
+			VariableValues:         nil,
+			ExecutedVariableValues: nil,
+			Optimization:           nil,
+			Application:            nil,
+		}
+		context.WorkerId = fmt.Sprintf("%d", i)
+		context.Optimization = self
+		context.Application = self.Application.Duplicate(context).(*OptimizationApplication)
+		self.Workers[context.WorkerId] = context
+	}
+
+	self.StartClientServer()
 }
 
 func (self *Optimization) StartClientServer() {
@@ -161,9 +358,40 @@ func (self *Optimization) EvaluateRun(writer http.ResponseWriter, reader *http.R
 }
 
 type OptimizationPrepareRequest struct {
-	Variables []*OptimizationVariable `json:"variables"`
-	Host      string                  `json:"host"`
-	Port      int64                   `json:"port"`
+	Variables map[string]any `json:"variables"`
+	Host      string         `json:"host"`
+	Port      int64          `json:"port"`
+	Name      string         `json:"name"`
+}
+
+func (self *OptimizationPrepareRequest) Map() map[string]any {
+	transformedVariables := map[string]any{}
+	for variableId, variable := range self.Variables {
+		variableType := getType(variable)
+		switch variableType {
+		case VARIABLE_BINARY:
+			transformedVariables[variableId] = variable.(*OptimizationBinary)
+		case VARIABLE_INTEGER:
+			transformedVariables[variableId] = variable.(*OptimizationInteger)
+		case VARIABLE_REAL:
+			transformedVariables[variableId] = variable.(*OptimizationReal)
+		case VARIABLE_CHOICE:
+			transformedVariables[variableId] = variable.(*OptimizationChoice)
+		default:
+			panic("Unknown type")
+		}
+	}
+	return map[string]any{
+		"variables": transformedVariables,
+		"host":      self.Host,
+		"port":      self.Port,
+		"name":      self.Name,
+	}
+}
+
+type OptimizationPrepareResponse struct {
+	Variables  map[string]any `json:"variables"`
+	NumWorkers int64          `json:"num_workers"`
 }
 
 type OptimizationEvaluatePrepareRequest struct {
