@@ -1,17 +1,24 @@
 import asyncio
 from typing import Dict, List, Callable, Any, Coroutine
 
+import dill
+import numpy as np
 from pymoo.core.plot import Plot
 from pymoo.core.problem import ElementwiseProblem
 from pymoo.core.result import Result
 from pymoo.core.variable import Variable, Binary, Choice, Integer, Real
+from pymoo.decomposition.asf import ASF
+from pymoo.visualization.pcp import PCP
+from pymoo.visualization.scatter import Scatter
+from sqlalchemy import delete
+from sqlmodel import Session, SQLModel, select
 
 from server.autocode.autocode.datastore import OneDatastore
 from server.autocode.autocode.gateway import EvaluationGateway
 from server.autocode.autocode.model import OptimizationPrepareRequest, OptimizationChoice, OptimizationBinary, \
     OptimizationInteger, OptimizationReal, OptimizationVariable, OptimizationClient, OptimizationEvaluateRunRequest, \
     OptimizationValue, OptimizationEvaluatePrepareRequest, OptimizationEvaluateRunResponse, OptimizationObjective, \
-    OptimizationInterpretation
+    OptimizationInterpretation, OptimizationPrepareResponse, Cache
 from server.autocode.autocode.setting import ApplicationSetting
 
 from ray.util.queue import Queue
@@ -142,32 +149,114 @@ class OptimizationUseCase:
         self.application_setting = application_setting
 
     def prepare(self, request: OptimizationPrepareRequest):
-        pass
+        client: OptimizationClient = OptimizationClient(
+            variables=request.variables,
+            host=request.host,
+            port=request.port,
+            name=request.name
+        )
+
+        for variable in request.variables.values():
+            variable.client_id = client.id
+
+        session: Session = self.one_datastore.get_session()
+        session.add(client)
+        session.commit()
+        session.close()
+
+        response = OptimizationPrepareResponse(
+            variables=request.variables,
+            num_workers=self.application_setting.num_cpus
+        )
+
+        return response
 
     def reset(self):
-        pass
+        SQLModel.metadata.drop_all(self.one_datastore.engine)
+        SQLModel.metadata.create_all(self.one_datastore.engine)
 
     def run(
             self,
             objectives: List[OptimizationObjective],
+            num_inequality_constraints: int,
+            num_equality_constraints: int,
             evaluator: Callable[[List[OptimizationEvaluateRunRequest]], Dict[str, Any]],
     ):
-        pass
+        variables: Dict[str, OptimizationBinary | OptimizationChoice | OptimizationInteger | OptimizationReal] = {}
+        session: Session = self.one_datastore.get_session()
+        session.exec(delete(Cache).where(Cache.key.startswith("results")))
+
+        client_caches = list(session.exec(select(Cache).where(Cache.key.startswith("clients"))).all())
+        objective_caches = list(session.exec(select(Cache).where(Cache.key == "objectives")).all())
+        variable_caches = list(session.exec(select(Cache).where(Cache.key == "variables")).all())
+
+        clients: Dict[str, OptimizationClient] = {}
+        for client_cache in client_caches:
+            client: OptimizationClient = dill.loads(client_cache.value)
+            clients[client.id] = client
+
+        if len(objective_caches) == 0:
+            objective_cache: Cache = Cache(
+                key="objectives",
+                value=dill.dumps(objectives)
+            )
+            session.add(objective_cache)
+        elif len(objective_caches) == 1:
+            objective_caches[0].value = dill.dumps(objectives)
+        else:
+            raise ValueError(f"Number of objectives {len(objective_caches)} is not supported.")
+
+        if len(variable_caches) == 0:
+            variable_cache: Cache = Cache(
+                key="variables",
+                value=dill.dumps(variables)
+            )
+            session.add(variable_cache)
+        elif len(variable_caches) == 1:
+            variable_caches[0].value = dill.dumps(variables)
+        else:
+            raise ValueError(f"Number of variables {len(variable_caches)} is not supported.")
+
+        session.commit()
+        session.close()
+
+        result: Result = self.minimize(
+            objectives=objectives,
+            num_inequality_constraints=num_inequality_constraints,
+            num_equality_constraints=num_equality_constraints,
+            variables=variables,
+            evaluator=evaluator,
+            clients=clients
+        )
+
+        if type(result.F) != np.ndarray or result.F.ndim == 1:
+            result.F = np.array([result.F])
+
+        del result.problem
+        del result.algorithm
+
+        return result
 
     def plot(self, result: Result, decision_index: int) -> List[Plot]:
-        pass
+        plot_0 = Scatter()
+        plot_0.add(result.F, color="blue")
+        plot_0.add(result.F[decision_index], color="green")
+        plot_0.title = "Scatter"
+        plot_0.show()
 
-    def interpret(
-            self,
-            objectives: List[OptimizationObjective],
-            result: Result,
-            weights: List[float]
-    ) -> OptimizationInterpretation:
-        pass
+        plot_1 = PCP()
+        plot_1.add(result.X, color="blue")
+        plot_1.add(result.X[decision_index], color="green")
+        plot_1.title = "Parallel Coordinate"
+        plot_1.show()
+
+        return [plot_0, plot_1]
 
     def minimize(
             self,
             objectives: List[OptimizationObjective],
+            num_inequality_constraints: int,
+            num_equality_constraints: int,
             variables: Dict[str, OptimizationVariable],
             evaluator: Callable[[List[OptimizationEvaluateRunRequest]], Dict[str, Any]],
             clients: Dict[str, OptimizationClient],
@@ -175,4 +264,20 @@ class OptimizationUseCase:
         pass
 
     def get_decision_index(self, result: Result, weights: List[float]) -> int:
-        pass
+        weights = np.asarray(weights)
+        sum_weights = np.sum(weights)
+
+        normalized_weights = weights / sum_weights if sum_weights != 0 else np.ones(weights) / len(weights)
+        normalized_weights[normalized_weights == 0] += np.finfo(normalized_weights.dtype).eps
+
+        ideal_point = np.min(result.F, axis=0)
+        nadir_point = np.max(result.F, axis=0)
+        scale = nadir_point - ideal_point
+        scale[scale == 0] += np.finfo(scale.dtype).eps
+        normalized_objectives = (result.F - ideal_point) / scale
+
+        decomposition = ASF()
+        mcdm = decomposition.do(normalized_objectives, 1 / normalized_weights)
+        decision_index = np.argmin(mcdm)
+
+        return decision_index

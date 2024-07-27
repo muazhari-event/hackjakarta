@@ -1,10 +1,13 @@
+import hashlib
 import uuid
 from typing import Optional, Any, List, Dict, Tuple
 
+import dill
 import numpy as np
 from pydantic.v1 import BaseModel as PydanticBaseModel, ConfigDict, Field
 from pydantic.v1 import PrivateAttr
 from pymoo.core.plot import Plot
+from sqlmodel import SQLModel
 
 
 class BaseModel(PydanticBaseModel):
@@ -135,3 +138,14 @@ class OptimizationInterpretation(BaseModel):
     solutions: List[Dict[str, OptimizationValue]]
     decision_index: int
     plots: List[Plot]
+
+
+class Cache(SQLModel, table=True):
+    key: str = Field(primary_key=True)
+    value: bytes
+
+    def __hash__(self):
+        return int.from_bytes(
+            bytes=hashlib.sha256(dill.dumps(self)).digest(),
+            byteorder="big"
+        )
