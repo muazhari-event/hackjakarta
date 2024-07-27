@@ -1,8 +1,13 @@
 import asyncio
+import uuid
 from typing import Dict, List, Callable, Any, Coroutine
 
 import dill
 import numpy as np
+from pymoo.algorithms.moo.sms import SMSEMOA
+from pymoo.core.algorithm import Algorithm
+from pymoo.core.callback import Callback
+from pymoo.core.mixed import MixedVariableSampling, MixedVariableMating, MixedVariableDuplicateElimination
 from pymoo.core.plot import Plot
 from pymoo.core.problem import ElementwiseProblem
 from pymoo.core.result import Result
@@ -14,15 +19,38 @@ from pymoo.visualization.scatter import Scatter
 from sqlalchemy import delete
 from sqlmodel import Session, SQLModel, select
 
-from server.autocode.autocode.datastore import OneDatastore
-from server.autocode.autocode.gateway import EvaluationGateway
-from server.autocode.autocode.model import OptimizationPrepareRequest, OptimizationChoice, OptimizationBinary, \
+from autocode.datastore import OneDatastore
+from autocode.gateway import EvaluationGateway
+from autocode.model import OptimizationPrepareRequest, OptimizationChoice, OptimizationBinary, \
     OptimizationInteger, OptimizationReal, OptimizationVariable, OptimizationClient, OptimizationEvaluateRunRequest, \
     OptimizationValue, OptimizationEvaluatePrepareRequest, OptimizationEvaluateRunResponse, OptimizationObjective, \
     OptimizationInterpretation, OptimizationPrepareResponse, Cache
-from server.autocode.autocode.setting import ApplicationSetting
+from autocode.setting import ApplicationSetting
 
 from ray.util.queue import Queue
+
+
+class OptimizationCallback(Callback):
+
+    def __init__(
+            self,
+            one_datastore: OneDatastore,
+    ):
+        super().__init__()
+        self.one_datastore = one_datastore
+
+    def notify(self, algorithm: Algorithm):
+        session: Session = self.one_datastore.get_session()
+        result: Result = algorithm.result()
+        del result.algorithm
+        del result.problem
+        cache: Cache = Cache(
+            key=f"results_{uuid.uuid4()}",
+            value=dill.dumps(result)
+        )
+        session.add(cache)
+        session.commit()
+        session.close()
 
 
 class OptimizationProblem(ElementwiseProblem):
@@ -37,14 +65,15 @@ class OptimizationProblem(ElementwiseProblem):
             variables: Dict[str, OptimizationBinary | OptimizationChoice | OptimizationInteger | OptimizationReal],
             clients: Dict[str, OptimizationClient],
             evaluator: Callable[[List[OptimizationEvaluateRunResponse]], Dict[str, Any]],
-            queue: Queue
     ):
         self.application_setting = application_setting
         self.optimization_gateway = optimization_gateway
         self.variables = variables
         self.clients = clients
         self.evaluator = evaluator
-        self.queue = queue
+        self.queue = Queue()
+        for i in range(self.application_setting.num_cpus):
+            self.queue.put(str(i))
         self.num_objectives = num_objectives
         self.num_inequality_constraints = num_inequality_constraints
         self.num_equality_constraints = num_equality_constraints
@@ -77,14 +106,15 @@ class OptimizationProblem(ElementwiseProblem):
             value: Any = X[variable_id]
             if type(value) is not OptimizationValue:
                 value: OptimizationValue = OptimizationValue(
+                    type=type(value).__name__,
                     data=value
                 )
             else:
                 value: OptimizationValue = value
 
-            if client_to_variable_values.get(variable.client_id) is None:
-                client_to_variable_values[variable.client_id] = {}
-            client_to_variable_values[variable.client_id][variable_id] = value
+            if client_to_variable_values.get(variable.get_client_id()) is None:
+                client_to_variable_values[variable.get_client_id()] = {}
+            client_to_variable_values[variable.get_client_id()][variable_id] = value
 
         prepare_futures: List[Coroutine] = []
         for client_id, variable_values in client_to_variable_values.items():
@@ -112,14 +142,14 @@ class OptimizationProblem(ElementwiseProblem):
             )
             run_futures.append(run_response)
 
-        self.queue.put(worker_id)
-
         results: List[OptimizationEvaluateRunResponse] = asyncio.get_event_loop().run_until_complete(
             asyncio.gather(*run_futures)
         )
 
+        self.queue.put(worker_id)
+
         for result, client in zip(results, self.clients.values()):
-            result.client = client
+            result.set_client(client)
 
         evaluator_output: Dict[str, Any] = self.evaluator(results)
         evaluator_output.setdefault("F", [])
@@ -141,15 +171,15 @@ class OptimizationProblem(ElementwiseProblem):
 class OptimizationUseCase:
     def __init__(
             self,
-            optimization_gateway: EvaluationGateway,
+            evaluation_gateway: EvaluationGateway,
             one_datastore: OneDatastore,
             application_setting: ApplicationSetting
     ):
-        self.optimization_gateway = optimization_gateway
+        self.evaluation_gateway = evaluation_gateway
         self.one_datastore = one_datastore
         self.application_setting = application_setting
 
-    def prepare(self, request: OptimizationPrepareRequest):
+    def prepare(self, request: OptimizationPrepareRequest) -> OptimizationPrepareResponse:
         client: OptimizationClient = OptimizationClient(
             variables=request.variables,
             host=request.host,
@@ -157,16 +187,20 @@ class OptimizationUseCase:
             name=request.name
         )
 
-        for variable in request.variables.values():
-            variable.client_id = client.id
+        for variable in client.variables.values():
+            variable.set_client_id(client.id)
 
         session: Session = self.one_datastore.get_session()
-        session.add(client)
+        client_cache: Cache = Cache(
+            key=f"clients_{client.id}",
+            value=dill.dumps(client)
+        )
+        session.add(client_cache)
         session.commit()
         session.close()
 
         response = OptimizationPrepareResponse(
-            variables=request.variables,
+            variables=client.variables,
             num_workers=self.application_setting.num_cpus
         )
 
@@ -181,7 +215,7 @@ class OptimizationUseCase:
             objectives: List[OptimizationObjective],
             num_inequality_constraints: int,
             num_equality_constraints: int,
-            evaluator: Callable[[List[OptimizationEvaluateRunRequest]], Dict[str, Any]],
+            evaluator: Callable[[List[OptimizationEvaluateRunResponse]], Dict[str, Any]],
     ):
         variables: Dict[str, OptimizationBinary | OptimizationChoice | OptimizationInteger | OptimizationReal] = {}
         session: Session = self.one_datastore.get_session()
@@ -189,12 +223,12 @@ class OptimizationUseCase:
 
         client_caches = list(session.exec(select(Cache).where(Cache.key.startswith("clients"))).all())
         objective_caches = list(session.exec(select(Cache).where(Cache.key == "objectives")).all())
-        variable_caches = list(session.exec(select(Cache).where(Cache.key == "variables")).all())
 
         clients: Dict[str, OptimizationClient] = {}
         for client_cache in client_caches:
             client: OptimizationClient = dill.loads(client_cache.value)
             clients[client.id] = client
+            variables.update(client.variables)
 
         if len(objective_caches) == 0:
             objective_cache: Cache = Cache(
@@ -206,17 +240,6 @@ class OptimizationUseCase:
             objective_caches[0].value = dill.dumps(objectives)
         else:
             raise ValueError(f"Number of objectives {len(objective_caches)} is not supported.")
-
-        if len(variable_caches) == 0:
-            variable_cache: Cache = Cache(
-                key="variables",
-                value=dill.dumps(variables)
-            )
-            session.add(variable_cache)
-        elif len(variable_caches) == 1:
-            variable_caches[0].value = dill.dumps(variables)
-        else:
-            raise ValueError(f"Number of variables {len(variable_caches)} is not supported.")
 
         session.commit()
         session.close()
@@ -246,8 +269,8 @@ class OptimizationUseCase:
         plot_0.show()
 
         plot_1 = PCP()
-        plot_1.add(result.X, color="blue")
-        plot_1.add(result.X[decision_index], color="green")
+        plot_1.add(result.F, color="blue")
+        plot_1.add(result.F[decision_index], color="green")
         plot_1.title = "Parallel Coordinate"
         plot_1.show()
 
@@ -262,27 +285,31 @@ class OptimizationUseCase:
             evaluator: Callable[[List[OptimizationEvaluateRunResponse]], Dict[str, Any]],
             clients: Dict[str, OptimizationClient],
     ) -> Result:
-        queue = Queue()
-        for i in range(self.application_setting.num_cpus):
-            queue.put(str(i))
-
         problem = OptimizationProblem(
             application_setting=self.application_setting,
-            optimization_gateway=self.optimization_gateway,
+            optimization_gateway=self.evaluation_gateway,
             num_objectives=len(objectives),
             num_inequality_constraints=num_inequality_constraints,
             num_equality_constraints=num_equality_constraints,
             variables=variables,
             clients=clients,
             evaluator=evaluator,
-            queue=queue
         )
 
-        algorithm
+        algorithm: SMSEMOA = SMSEMOA(
+            sampling=MixedVariableSampling(),
+            mating=MixedVariableMating(eliminate_duplicates=MixedVariableDuplicateElimination()),
+            eliminate_duplicates=MixedVariableDuplicateElimination(),
+        )
+
+        callback: OptimizationCallback = OptimizationCallback(
+            one_datastore=self.one_datastore
+        )
 
         result: Result = minimize(
             problem,
-            algorithm=algorithm,
+            algorithm,
+            callback=callback,
             seed=1,
             verbose=True
         )

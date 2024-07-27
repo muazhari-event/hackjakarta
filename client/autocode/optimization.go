@@ -7,8 +7,18 @@ import (
 	"github.com/cosmos72/gomacro/fast"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"github.com/valyala/fasthttp"
+	"github.com/valyala/fasthttp/fasthttpadaptor"
+	"go/ast"
+	"go/parser"
+	"go/printer"
+	"go/token"
+	"io"
+	"log"
 	"net/http"
 	"reflect"
+	"runtime"
+	"strings"
 )
 
 const VARIABLE_BINARY = "OptimizationBinary"
@@ -16,9 +26,9 @@ const VARIABLE_INTEGER = "OptimizationInteger"
 const VARIABLE_REAL = "OptimizationReal"
 const VARIABLE_CHOICE = "OptimizationChoice"
 const VALUE_FUNCTION = "function"
-const VALUE_BOOLEAN = "boolean"
-const VALUE_INTEGER = "integer"
-const VALUE_REAL = "real"
+const VALUE_BOOLEAN = "bool"
+const VALUE_INTEGER = "int"
+const VALUE_FLOAT = "float"
 
 type OptimizationVariable struct {
 	Id   string `json:"id"`
@@ -40,9 +50,28 @@ func NewOptimizationBinary(name string) *OptimizationBinary {
 	}
 }
 
+func (self *OptimizationBinary) Map() (output map[string]any) {
+	data := map[string]any{}
+	data["id"] = self.Id
+	data["type"] = self.Type
+	data["name"] = self.Name
+	output = data
+	return output
+}
+
 type OptimizationInteger struct {
 	*OptimizationVariable
 	Bounds [2]int64 `json:"bounds"`
+}
+
+func (self *OptimizationInteger) Map() (output map[string]any) {
+	data := map[string]any{}
+	data["id"] = self.Id
+	data["type"] = self.Type
+	data["name"] = self.Name
+	data["bounds"] = self.Bounds
+	output = data
+	return output
 }
 
 func NewOptimizationInteger(name string, lowerBound int64, upperBound int64) *OptimizationInteger {
@@ -61,6 +90,16 @@ type OptimizationReal struct {
 	Bounds [2]float64 `json:"bounds"`
 }
 
+func (self *OptimizationReal) Map() (output map[string]any) {
+	data := map[string]any{}
+	data["id"] = self.Id
+	data["type"] = self.Type
+	data["name"] = self.Name
+	data["bounds"] = self.Bounds
+	output = data
+	return output
+}
+
 func NewOptimizationReal(name string, lowerBound float64, upperBound float64) *OptimizationReal {
 	return &OptimizationReal{
 		OptimizationVariable: &OptimizationVariable{
@@ -77,20 +116,35 @@ type OptimizationChoice struct {
 	Options map[string]*OptimizationValue `json:"options"`
 }
 
+func (self *OptimizationChoice) Map() (output map[string]any) {
+	data := map[string]any{}
+	data["id"] = self.Id
+	data["type"] = self.Type
+	data["name"] = self.Name
+	options := map[string]any{}
+	data["options"] = options
+	for optionId, option := range self.Options {
+		options[optionId] = option.Map()
+	}
+	output = data
+	return output
+
+}
+
 func getType(value any) string {
 	switch value.(type) {
-	case OptimizationBinary:
+	case *OptimizationBinary:
 		return VARIABLE_BINARY
-	case OptimizationInteger:
+	case *OptimizationInteger:
 		return VARIABLE_INTEGER
-	case OptimizationReal:
+	case *OptimizationReal:
 		return VARIABLE_REAL
-	case OptimizationChoice:
+	case *OptimizationChoice:
 		return VARIABLE_CHOICE
 	case int64:
 		return VALUE_INTEGER
 	case float64:
-		return VALUE_REAL
+		return VALUE_FLOAT
 	case bool:
 		return VALUE_BOOLEAN
 	case FunctionValue:
@@ -120,6 +174,7 @@ func NewOptimizationChoice(name string, options []any) *OptimizationChoice {
 			Type: optionType,
 			Data: option,
 		}
+
 	}
 	return &OptimizationChoice{
 		OptimizationVariable: &OptimizationVariable{
@@ -137,6 +192,20 @@ type OptimizationValue struct {
 	Data any    `json:"data"`
 }
 
+func (self *OptimizationValue) Map() (output map[string]any) {
+	data := map[string]any{}
+	data["id"] = self.Id
+	data["type"] = self.Type
+	data["data"] = self.Data
+	if self.Data != nil {
+		if data["type"] == VALUE_FUNCTION {
+			data["data"] = (self.Data.(*OptimizationFunctionValue)).Map()
+		}
+	}
+	output = data
+	return output
+}
+
 type FunctionValue = func(*OptimizationApplicationContext, ...any) any
 type OptimizationFunctionValue struct {
 	Function               FunctionValue
@@ -147,9 +216,51 @@ type OptimizationFunctionValue struct {
 	Modularization         float64
 }
 
+func (self *OptimizationFunctionValue) GetName() (output string) {
+	output = runtime.FuncForPC(reflect.ValueOf(self.Function).Pointer()).Name()
+	return output
+}
+
+func (self *OptimizationFunctionValue) Parse() (functionDeclaration *ast.FuncDecl, fileSet *token.FileSet) {
+	fileSet = token.NewFileSet()
+	function := runtime.FuncForPC(reflect.ValueOf(self.Function).Pointer())
+	segments := strings.Split(function.Name(), ".")
+	functionName := segments[len(segments)-1]
+	fileName, line := function.FileLine(0)
+	if file, err := parser.ParseFile(fileSet, fileName, nil, 0); err == nil {
+		for _, declaration := range file.Decls {
+			f, ok := declaration.(*ast.FuncDecl)
+			if ok && f.Name.Name == functionName {
+				functionDeclaration = f
+				return functionDeclaration, fileSet
+			}
+		}
+	}
+	panic(fmt.Errorf("function not found: %s at %s:%d", functionName, fileName, line))
+}
+
+func (self *OptimizationFunctionValue) GetString() (output string) {
+	functionDeclaration, fileSet := self.Parse()
+	buffer := &bytes.Buffer{}
+	printErr := printer.Fprint(buffer, fileSet, functionDeclaration)
+	if printErr != nil {
+		panic(printErr)
+	}
+	output = buffer.String()
+	return output
+}
+
+func (self *OptimizationFunctionValue) Map() (output map[string]any) {
+	data := map[string]any{}
+	data["name"] = self.GetName()
+	data["string"] = self.GetString()
+	output = data
+	return output
+}
+
 type OptimizationEvaluateRunResponse struct {
 	Objectives            []float64 `json:"objectives"`
-	InequalityConstraints []float64 `json:"inequality_onstraints"`
+	InequalityConstraints []float64 `json:"inequality_constraints"`
 	EqualityConstraints   []float64 `json:"equality_constraints"`
 }
 
@@ -163,8 +274,49 @@ type OptimizationApplicationContext struct {
 	VariableValues         map[string]*OptimizationValue
 	ExecutedVariableValues map[string]any
 	Optimization           *Optimization
-	Application            *OptimizationApplication
+	Application            OptimizationApplication
 }
+
+func (self *OptimizationApplicationContext) GetValue(variableName string, arguments ...any) (output any) {
+	variableId := ""
+	for currentVariableId, currentVariable := range self.Optimization.Variables {
+		currentVariableName := getFieldValue(currentVariable, "Name")
+		if currentVariableName == variableName {
+			variableId = currentVariableId
+			break
+		}
+	}
+	if variableId == "" {
+		panic(fmt.Sprintf("variable not found: %s", variableName))
+	}
+
+	executedValue, executedValueExists := self.ExecutedVariableValues[variableId]
+	if executedValueExists == true {
+		return executedValue
+	}
+	value, valueExists := self.VariableValues[variableId]
+	if valueExists == false {
+		panic(fmt.Sprintf("variable value not found: %s", variableName))
+	}
+	if value.Type == VALUE_FUNCTION {
+		variable := self.Optimization.Variables[variableId]
+		choice := variable.(*OptimizationChoice)
+		option := choice.Options[value.Id]
+		function := option.Data.(*OptimizationFunctionValue)
+		output = function.Function(self, arguments...)
+	} else if value.Type == VALUE_INTEGER {
+		output = int64(value.Data.(float64))
+	} else if value.Type == VALUE_FLOAT {
+		output = value.Data.(float64)
+	} else if value.Type == VALUE_BOOLEAN {
+		output = value.Data.(bool)
+	} else {
+		panic(fmt.Sprintf("unsupported value type: %s", value.Type))
+	}
+	self.ExecutedVariableValues[variableId] = output
+	return output
+}
+
 type Optimization struct {
 	Variables   map[string]any
 	Application OptimizationApplication
@@ -199,10 +351,10 @@ func NewOptimization(
 		Application: application,
 		ServerHost:  serverHost,
 		ServerPort:  serverPort,
-		ServerUrl:   fmt.Sprintf("%s:%d", serverHost, serverPort),
+		ServerUrl:   fmt.Sprintf("http://%s:%d", serverHost, serverPort),
 		ClientHost:  clientHost,
 		ClientPort:  clientPort,
-		ClientUrl:   fmt.Sprintf("%s:%d", clientHost, clientPort),
+		ClientUrl:   fmt.Sprintf("http://%s:%d", clientHost, clientPort),
 		ClientName:  clientName,
 		Workers:     workers,
 		Interpreter: fast.New(),
@@ -212,7 +364,7 @@ func NewOptimization(
 }
 
 func getFieldValue(variable any, field string) (output any) {
-	reflectedVariable := reflect.ValueOf(variable)
+	reflectedVariable := reflect.Indirect(reflect.ValueOf(variable))
 	fieldValue := reflectedVariable.FieldByName(field)
 	output = fieldValue.Interface()
 	return output
@@ -312,7 +464,7 @@ func (self *Optimization) Prepare() {
 		}
 		context.WorkerId = fmt.Sprintf("%d", i)
 		context.Optimization = self
-		context.Application = self.Application.Duplicate(context).(*OptimizationApplication)
+		context.Application = self.Application.Duplicate(context).(OptimizationApplication)
 		self.Workers[context.WorkerId] = context
 	}
 
@@ -322,9 +474,10 @@ func (self *Optimization) Prepare() {
 func (self *Optimization) StartClientServer() {
 	router := mux.NewRouter()
 	apiRouter := router.PathPrefix("/apis").Subrouter()
-	apiRouter.HandleFunc("/optimizations/evaluates/prepares", self.EvaluatePrepare)
-	apiRouter.HandleFunc("/optimizations/evaluates/runs", self.EvaluateRun)
-	serverErr := http.ListenAndServe(self.ServerUrl, router)
+	apiRouter.HandleFunc("/optimizations/evaluates/prepares", self.EvaluatePrepare).Methods(http.MethodPost)
+	apiRouter.HandleFunc("/optimizations/evaluates/runs", self.EvaluateRun).Methods(http.MethodPost)
+	address := fmt.Sprintf("%s:%d", self.ClientHost, self.ClientPort)
+	serverErr := fasthttp.ListenAndServe(address, fasthttpadaptor.NewFastHTTPHandler(router))
 	if serverErr != nil {
 		panic(serverErr)
 	}
@@ -346,12 +499,16 @@ func (self *Optimization) EvaluateRun(writer http.ResponseWriter, reader *http.R
 	responseBody := &OptimizationEvaluateRunRequest{}
 	decodeErr := json.NewDecoder(reader.Body).Decode(responseBody)
 	if decodeErr != nil {
+		responseBodyBytes, _ := io.ReadAll(reader.Body)
+		log.Println(fmt.Sprintf("failed to decode request body: %s", string(responseBodyBytes)))
+		writer.WriteHeader(http.StatusInternalServerError)
 		panic(decodeErr)
 	}
 
 	worker := self.Workers[responseBody.WorkerId]
-	response := worker.Application
-	encodeErr := json.NewEncoder(writer).Encode(response)
+	evaluation := worker.Application.Evaluate(worker)
+
+	encodeErr := json.NewEncoder(writer).Encode(evaluation)
 	if encodeErr != nil {
 		panic(encodeErr)
 	}
@@ -370,13 +527,13 @@ func (self *OptimizationPrepareRequest) Map() map[string]any {
 		variableType := getType(variable)
 		switch variableType {
 		case VARIABLE_BINARY:
-			transformedVariables[variableId] = variable.(*OptimizationBinary)
+			transformedVariables[variableId] = variable.(*OptimizationBinary).Map()
 		case VARIABLE_INTEGER:
-			transformedVariables[variableId] = variable.(*OptimizationInteger)
+			transformedVariables[variableId] = variable.(*OptimizationInteger).Map()
 		case VARIABLE_REAL:
-			transformedVariables[variableId] = variable.(*OptimizationReal)
+			transformedVariables[variableId] = variable.(*OptimizationReal).Map()
 		case VARIABLE_CHOICE:
-			transformedVariables[variableId] = variable.(*OptimizationChoice)
+			transformedVariables[variableId] = variable.(*OptimizationChoice).Map()
 		default:
 			panic("Unknown type")
 		}

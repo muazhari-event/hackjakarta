@@ -1,7 +1,7 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Body
 
-from server.autocode.autocode.model import OptimizationPrepareRequest
-from server.autocode.autocode.use_case import OptimizationUseCase
+from autocode.model import OptimizationPrepareRequest, OptimizationPrepareResponse
+from autocode.use_case import OptimizationUseCase
 
 
 class OptimizationController:
@@ -9,6 +9,7 @@ class OptimizationController:
             self,
             optimization_use_case: OptimizationUseCase,
     ):
+        self.optimization_use_case = optimization_use_case
         self.router: APIRouter = APIRouter(
             prefix="/optimizations",
             tags=["optimizations"]
@@ -20,7 +21,11 @@ class OptimizationController:
         )
 
     def prepare(self, request: OptimizationPrepareRequest = Body()) -> OptimizationPrepareResponse:
-        pass
+        response: OptimizationPrepareResponse = self.optimization_use_case.prepare(
+            request=request
+        )
+
+        return response
 
 
 class HealthController:

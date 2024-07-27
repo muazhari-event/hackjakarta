@@ -2,7 +2,7 @@ from http import HTTPStatus
 
 from httpx import AsyncClient, AsyncHTTPTransport
 
-from server.autocode.autocode.model import OptimizationEvaluatePrepareRequest, OptimizationClient, \
+from autocode.model import OptimizationEvaluatePrepareRequest, OptimizationClient, \
     OptimizationEvaluateRunRequest, OptimizationEvaluateRunResponse
 
 
@@ -17,7 +17,7 @@ class EvaluationGateway:
         )
         response = await client.post(
             url="/optimizations/evaluates/prepares",
-            json=request.json(),
+            json=request.model_dump(mode="json"),
             timeout=None
         )
 
@@ -31,7 +31,7 @@ class EvaluationGateway:
         )
         response = await client.post(
             url="/optimizations/evaluates/runs",
-            json=request.json(),
+            json=request.model_dump(mode="json"),
             timeout=None
         )
 

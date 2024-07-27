@@ -4,16 +4,18 @@ from typing import Optional, Any, List, Dict, Tuple
 
 import dill
 import numpy as np
-from pydantic.v1 import BaseModel as PydanticBaseModel, ConfigDict, Field
-from pydantic.v1 import PrivateAttr
+from pydantic import BaseModel as PydanticBaseModel, ConfigDict, Field
+from pydantic import PrivateAttr
 from pymoo.core.plot import Plot
-from sqlmodel import SQLModel
+from sqlmodel import SQLModel, Field as SQLField
 
 
 class BaseModel(PydanticBaseModel):
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
-        validate_all=True,
+        revalidate_instances="always",
+        validate_default=True,
+        validate_return=True,
         validate_assignment=True,
     )
 
@@ -22,16 +24,22 @@ class OptimizationVariable(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     type: str
     name: str
-    client_id: Optional[str] = PrivateAttr(default=None)
+    _client_id: Optional[str] = PrivateAttr(default=None)
+
+    def get_client_id(self):
+        return self._client_id
+
+    def set_client_id(self, client_id: str):
+        self._client_id = client_id
 
 
 class OptimizationValueFunction(BaseModel):
     name: str
     string: str
-    understandability: int
-    complexity: int
-    maintainability: int
-    overall_maintainability: int
+    understandability: Optional[int] = Field(default=None)
+    complexity: Optional[int] = Field(default=None)
+    maintainability: Optional[int] = Field(default=None)
+    overall_maintainability: Optional[int] = Field(default=None)
 
 
 class OptimizationValue(BaseModel):
@@ -54,11 +62,12 @@ class OptimizationValue(BaseModel):
             return data
 
     def __init__(self, **data):
-        converted_data = self.convert_type(data["data"])
+        data["data"] = self.convert_type(data["data"])
         if data["type"] == "function":
-            data["data"] = OptimizationValueFunction(**converted_data)
+            if type(data["data"]) != OptimizationValueFunction:
+                data["data"] = OptimizationValueFunction(**data["data"])
         else:
-            data["type"] = type(converted_data).__name__
+            data["type"] = type(data["data"]).__name__
         super().__init__(**data)
 
 
@@ -67,7 +76,7 @@ class OptimizationBinary(OptimizationVariable):
 
 
 class OptimizationChoice(OptimizationVariable):
-    options: Dict[str, Any | OptimizationValue]
+    options: Dict[str, OptimizationValue]
 
 
 class OptimizationReal(OptimizationVariable):
@@ -84,6 +93,7 @@ class OptimizationObjective(BaseModel):
 
 class OptimizationClient(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    variables: Dict[str, OptimizationBinary | OptimizationChoice | OptimizationInteger | OptimizationReal]
     name: str
     host: str
     port: int
@@ -92,19 +102,19 @@ class OptimizationClient(BaseModel):
 class OptimizationPrepareRequest(BaseModel):
     variables: Dict[str, OptimizationBinary | OptimizationChoice | OptimizationInteger | OptimizationReal]
     host: str
-    name: str
     port: int
+    name: str
 
     def __init__(self, **data):
         transformed_variables: Dict[str, OptimizationVariable] = {}
         for variable_id, variable in data["variables"].items():
-            if variable["type"] == "binary":
+            if variable["type"] == OptimizationBinary.__name__:
                 transformed_variables[variable_id] = OptimizationBinary(**variable)
-            elif variable["type"] == "choice":
+            elif variable["type"] == OptimizationChoice.__name__:
                 transformed_variables[variable_id] = OptimizationChoice(**variable)
-            elif variable["type"] == "integer":
+            elif variable["type"] == OptimizationInteger.__name__:
                 transformed_variables[variable_id] = OptimizationInteger(**variable)
-            elif variable["type"] == "real":
+            elif variable["type"] == OptimizationReal.__name__:
                 transformed_variables[variable_id] = OptimizationReal(**variable)
             else:
                 raise ValueError(f"Variable type {variable['type']} is not supported.")
@@ -130,7 +140,13 @@ class OptimizationEvaluateRunResponse(BaseModel):
     objectives: List[float]
     inequality_constraints: List[float]
     equality_constraints: List[float]
-    client: Optional[OptimizationClient] = PrivateAttr(default=None)
+    _client: Optional[OptimizationClient] = PrivateAttr(default=None)
+
+    def set_client(self, client: OptimizationClient):
+        self._client = client
+
+    def get_client(self) -> OptimizationClient:
+        return self._client
 
 
 class OptimizationInterpretation(BaseModel):
@@ -141,7 +157,7 @@ class OptimizationInterpretation(BaseModel):
 
 
 class Cache(SQLModel, table=True):
-    key: str = Field(primary_key=True)
+    key: str = SQLField(primary_key=True)
     value: bytes
 
     def __hash__(self):

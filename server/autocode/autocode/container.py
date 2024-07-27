@@ -1,12 +1,12 @@
 from dependency_injector import providers
 from dependency_injector.containers import DeclarativeContainer
 
-from server.autocode.autocode.controller import OptimizationController, HealthController
-from server.autocode.autocode.datastore import OneDatastore
-from server.autocode.autocode.gateway import EvaluationGateway
-from server.autocode.autocode.router import ApiRouter
-from server.autocode.autocode.setting import ApplicationSetting
-from server.autocode.autocode.use_case import OptimizationUseCase
+from autocode.controller import OptimizationController, HealthController
+from autocode.datastore import OneDatastore
+from autocode.gateway import EvaluationGateway
+from autocode.router import ApiRouter
+from autocode.setting import ApplicationSetting
+from autocode.use_case import OptimizationUseCase
 
 
 class SettingContainer(DeclarativeContainer):
@@ -16,11 +16,8 @@ class SettingContainer(DeclarativeContainer):
 
 
 class GatewayContainer(DeclarativeContainer):
-    settings = providers.DependenciesContainer()
-
     evaluation = providers.Singleton(
         EvaluationGateway,
-        application_setting=settings.application
     )
 
 
@@ -35,7 +32,7 @@ class UseCaseContainer(DeclarativeContainer):
     gateways = providers.DependenciesContainer()
     datastores = providers.DependenciesContainer()
 
-    one = providers.Singleton(
+    optimization = providers.Singleton(
         OptimizationUseCase,
         evaluation_gateway=gateways.evaluation,
         one_datastore=datastores.one,
@@ -66,7 +63,7 @@ class RouterContainer(DeclarativeContainer):
     )
 
 
-class MainContainer(DeclarativeContainer):
+class ApplicationContainer(DeclarativeContainer):
     settings = providers.Container(
         SettingContainer
     )
@@ -78,6 +75,8 @@ class MainContainer(DeclarativeContainer):
     )
     use_cases = providers.Container(
         UseCaseContainer,
+        settings=settings,
+        datastores=datastores,
         gateways=gateways,
     )
     controllers = providers.Container(

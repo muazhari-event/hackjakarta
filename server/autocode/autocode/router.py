@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from server.autocode.autocode.controller import OptimizationController, HealthController
+from autocode.controller import OptimizationController, HealthController
 
 
 class ApiRouter:
