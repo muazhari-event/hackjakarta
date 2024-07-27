@@ -8,6 +8,7 @@ from pymoo.core.problem import ElementwiseProblem
 from pymoo.core.result import Result
 from pymoo.core.variable import Variable, Binary, Choice, Integer, Real
 from pymoo.decomposition.asf import ASF
+from pymoo.optimize import minimize
 from pymoo.visualization.pcp import PCP
 from pymoo.visualization.scatter import Scatter
 from sqlalchemy import delete
@@ -257,11 +258,36 @@ class OptimizationUseCase:
             objectives: List[OptimizationObjective],
             num_inequality_constraints: int,
             num_equality_constraints: int,
-            variables: Dict[str, OptimizationVariable],
-            evaluator: Callable[[List[OptimizationEvaluateRunRequest]], Dict[str, Any]],
+            variables: Dict[str, OptimizationBinary | OptimizationChoice | OptimizationInteger | OptimizationReal],
+            evaluator: Callable[[List[OptimizationEvaluateRunResponse]], Dict[str, Any]],
             clients: Dict[str, OptimizationClient],
     ) -> Result:
-        pass
+        queue = Queue()
+        for i in range(self.application_setting.num_cpus):
+            queue.put(str(i))
+
+        problem = OptimizationProblem(
+            application_setting=self.application_setting,
+            optimization_gateway=self.optimization_gateway,
+            num_objectives=len(objectives),
+            num_inequality_constraints=num_inequality_constraints,
+            num_equality_constraints=num_equality_constraints,
+            variables=variables,
+            clients=clients,
+            evaluator=evaluator,
+            queue=queue
+        )
+
+        algorithm
+
+        result: Result = minimize(
+            problem,
+            algorithm=algorithm,
+            seed=1,
+            verbose=True
+        )
+
+        return result
 
     def get_decision_index(self, result: Result, weights: List[float]) -> int:
         weights = np.asarray(weights)
