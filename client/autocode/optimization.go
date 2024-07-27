@@ -423,8 +423,15 @@ func (self *Optimization) Prepare() {
 						functionNameSegments := strings.Split(data["name"].(string), ".")
 						functionName := functionNameSegments[len(functionNameSegments)-1]
 						functionString := data["string"].(string)
-						self.Interpreter.Eval(functionString)
-						function, _ := self.Interpreter.Eval1(functionName)
+						interpreter := fast.New()
+						imports := `
+						import (
+							"../autocode"
+						)
+						`
+						interpreter.Eval(imports)
+						interpreter.Eval(functionString)
+						function, _ := interpreter.Eval1(functionName)
 						newOptionData = &OptimizationFunctionValue{
 							Function:               function.Interface().(FunctionValue),
 							Complexity:             data["complexity"].(float64),

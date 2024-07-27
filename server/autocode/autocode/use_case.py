@@ -359,8 +359,9 @@ class OptimizationUseCase:
             name=request.name
         )
 
-        dict_variation_futures: Dict[str, Coroutine] = {}
-
+        list_variation_futures: List[Coroutine] = []
+        list_variables: List[OptimizationVariable] = []
+        list_functions: List[OptimizationValueFunction] = []
 
         for variable_id, variable in client.variables.items():
             variable.set_client_id(client.id)
@@ -368,12 +369,45 @@ class OptimizationUseCase:
             if type(variable) is OptimizationChoice:
                 for option_id, option in variable.options.items():
                     if option.type == "function":
-                        future_variation: Coroutine = self.llm_use_case.generate_function_variation(option.data)
-                        dict_variation_futures[option_id] = future_variation
+                        function: OptimizationValueFunction = option.data
+                        future_variation: Coroutine = self.llm_use_case.generate_function_variation(function)
+                        list_variation_futures.append(future_variation)
+                        list_variables.append(variable)
+                        list_functions.append(function)
 
-        list_variation_futures: List[List[CodeVariation]] = list(dict_variation_futures.values())
-        list_variation = asyncio.get_event_loop().run_until_complete(asyncio.gather(*list_variation_futures))
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
+        list_variations = asyncio.get_event_loop().run_until_complete(asyncio.gather(*list_variation_futures))
+        for variable, variations, function in zip(list_variables, list_variations, list_functions):
+            for variation in variations:
+                new_option_id: str = str(uuid.uuid4())
+                copied_function: OptimizationValueFunction = copy.deepcopy(function)
+                copied_function.string = variation.variation
+                variable.options[new_option_id] = OptimizationValue(
+                    id=new_option_id,
+                    type="function",
+                    data=copied_function
+                )
+
+        list_functions: List[OptimizationValueFunction] = []
+        list_scoring_futures: List[Coroutine] = []
+        for variable_id, variable in client.variables.items():
+            if type(variable) is OptimizationChoice:
+                for option_id, function in variable.options.items():
+                    if function.type == "function":
+                        future_scoring: Coroutine = self.llm_use_case.function_scoring(function.data)
+                        list_scoring_futures.append(future_scoring)
+                        list_functions.append(function.data)
+
+        list_scores = asyncio.get_event_loop().run_until_complete(asyncio.gather(*list_scoring_futures))
+        for function, score in zip(list_functions, list_scores):
+            function.understandability = score[0].understandability
+            function.error_potential = score[0].error_potential
+            function.readability = score[0].readability
+            function.complexity = score[0].complexity
+            function.modularity = score[0].modularity
+            function.overall_maintainability = score[0].overall_maintainability
 
         session: Session = self.one_datastore.get_session()
         client_cache: Cache = Cache(

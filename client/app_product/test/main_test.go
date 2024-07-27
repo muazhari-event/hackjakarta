@@ -165,7 +165,7 @@ func Test(t *testing.T) {
 	variables := []any{
 		autocode.NewOptimizationChoice(
 			"a",
-			[]any{a0, a1},
+			[]any{a0},
 		),
 		//autocode.NewOptimizationChoice(
 		//	"b",

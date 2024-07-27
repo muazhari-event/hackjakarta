@@ -37,7 +37,7 @@ class CodeScoring(BaseModelV1):
     readability: float = FieldV1(description="Readability score.")
     understandability: float = FieldV1(description="Understandability score.")
     complexity: float = FieldV1(description="Complexity score.")
-    modularization: float = FieldV1(description="Modularity score.")
+    modularity: float = FieldV1(description="Modularity score.")
     overall_maintainability: float = FieldV1(description="Overall maintainability score.")
 
 
@@ -79,8 +79,8 @@ class OptimizationValueFunction(BaseModel):
     error_potential: Optional[int] = Field(default=None)
     understandability: Optional[int] = Field(default=None)
     complexity: Optional[int] = Field(default=None)
-    maintainability: Optional[int] = Field(default=None)
-    modularization: Optional[int] = Field(default=None)
+    readability: Optional[int] = Field(default=None)
+    modularity: Optional[int] = Field(default=None)
     overall_maintainability: Optional[int] = Field(default=None)
 
 
