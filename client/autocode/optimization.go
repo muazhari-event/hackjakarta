@@ -78,6 +78,8 @@ type OptimizationApplicationContext struct {
 	Application            *OptimizationApplication
 }
 type Optimization struct {
+	Variables   []any
+	Application OptimizationApplication
 	ServerHost  string
 	ServerPort  int64
 	ClientHost  string
@@ -90,7 +92,7 @@ type Optimization struct {
 }
 
 func NewOptimization(
-	variables []*OptimizationVariable,
+	variables []any,
 	application OptimizationApplication,
 	serverHost string,
 	serverPort int64,
@@ -100,6 +102,8 @@ func NewOptimization(
 ) (optimization *Optimization) {
 	workers := make(map[string]*OptimizationApplicationContext)
 	optimization = &Optimization{
+		Variables:   variables,
+		Application: application,
 		ServerHost:  serverHost,
 		ServerPort:  serverPort,
 		ServerUrl:   fmt.Sprintf("%s:%d", serverHost, serverPort),
@@ -164,7 +168,7 @@ type OptimizationPrepareRequest struct {
 
 type OptimizationEvaluatePrepareRequest struct {
 	WorkerId       string                        `json:"worker_id"`
-	VariableValues map[string]*OptimizationValue `json:"variafble_values"`
+	VariableValues map[string]*OptimizationValue `json:"variable_values"`
 }
 
 type OptimizationEvaluateRunRequest struct {
