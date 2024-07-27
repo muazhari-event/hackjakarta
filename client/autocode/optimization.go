@@ -1,7 +1,10 @@
 package autocode
 
 import (
+	"encoding/json"
+	"fmt"
 	"github.com/cosmos72/gomacro/fast"
+	"github.com/gorilla/mux"
 	"net/http"
 )
 
@@ -56,7 +59,7 @@ type OptimizationFunctionValue struct {
 	Modularization         float64
 }
 
-type OptimizationEvaluateResponse struct {
+type OptimizationEvaluateRunResponse struct {
 	Objectives            []float64 `json:"objectives"`
 	InequalityConstraints []float64 `json:"inequality_onstraints"`
 	EqualityConstraints   []float64 `json:"equality_constraints"`
@@ -64,7 +67,7 @@ type OptimizationEvaluateResponse struct {
 
 type OptimizationApplication interface {
 	Duplicate(ctx *OptimizationApplicationContext) any
-	Evaluate(ctx *OptimizationApplicationContext) *OptimizationEvaluateResponse
+	Evaluate(ctx *OptimizationApplicationContext) *OptimizationEvaluateRunResponse
 }
 
 type OptimizationApplicationContext struct {
@@ -86,8 +89,27 @@ type Optimization struct {
 	Interpreter *fast.Interp
 }
 
-func NewOptimization() (optimization *Optimization) {
-	optimization = &Optimization{}
+func NewOptimization(
+	variables []*OptimizationVariable,
+	application OptimizationApplication,
+	serverHost string,
+	serverPort int64,
+	clientHost string,
+	clientPort int64,
+	clientName string,
+) (optimization *Optimization) {
+	workers := make(map[string]*OptimizationApplicationContext)
+	optimization = &Optimization{
+		ServerHost:  serverHost,
+		ServerPort:  serverPort,
+		ServerUrl:   fmt.Sprintf("%s:%d", serverHost, serverPort),
+		ClientHost:  clientHost,
+		ClientPort:  clientPort,
+		ClientUrl:   fmt.Sprintf("%s:%d", clientHost, clientPort),
+		ClientName:  clientName,
+		Workers:     workers,
+		Interpreter: fast.New(),
+	}
 
 	return optimization
 }
@@ -97,15 +119,41 @@ func (self *Optimization) Prepare() {
 }
 
 func (self *Optimization) StartClientServer() {
-
+	router := mux.NewRouter()
+	apiRouter := router.PathPrefix("/apis").Subrouter()
+	apiRouter.HandleFunc("/optimizations/evaluates/prepares", self.EvaluatePrepare)
+	apiRouter.HandleFunc("/optimizations/evaluates/runs", self.EvaluateRun)
+	serverErr := http.ListenAndServe(self.ServerUrl, router)
+	if serverErr != nil {
+		panic(serverErr)
+	}
 }
 
 func (self *Optimization) EvaluatePrepare(writer http.ResponseWriter, reader *http.Request) {
+	responseBody := &OptimizationEvaluatePrepareRequest{}
+	decodeErr := json.NewDecoder(reader.Body).Decode(responseBody)
+	if decodeErr != nil {
+		panic(decodeErr)
+	}
 
+	worker := self.Workers[responseBody.WorkerId]
+	worker.VariableValues = responseBody.VariableValues
+	worker.ExecutedVariableValues = map[string]any{}
 }
 
 func (self *Optimization) EvaluateRun(writer http.ResponseWriter, reader *http.Request) {
+	responseBody := &OptimizationEvaluateRunRequest{}
+	decodeErr := json.NewDecoder(reader.Body).Decode(responseBody)
+	if decodeErr != nil {
+		panic(decodeErr)
+	}
 
+	worker := self.Workers[responseBody.WorkerId]
+	response := worker.Application
+	encodeErr := json.NewEncoder(writer).Encode(response)
+	if encodeErr != nil {
+		panic(encodeErr)
+	}
 }
 
 type OptimizationPrepareRequest struct {
@@ -114,12 +162,11 @@ type OptimizationPrepareRequest struct {
 	Port      int64                   `json:"port"`
 }
 
-type OptimizationEvaluateRunRequest struct {
-	WorkerId string `json:"worker_id"`
+type OptimizationEvaluatePrepareRequest struct {
+	WorkerId       string                        `json:"worker_id"`
+	VariableValues map[string]*OptimizationValue `json:"variafble_values"`
 }
 
-type OptimizationEvaluateRunResponse struct {
-	Objectives            []float64 `json:"objectives"`
-	InequalityConstraints []float64 `json:"inequality_constraints"`
-	EqualityConstraints   []float64 `json:"equality_constraints"`
+type OptimizationEvaluateRunRequest struct {
+	WorkerId string `json:"worker_id"`
 }
