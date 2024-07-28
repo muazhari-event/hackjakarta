@@ -90,7 +90,7 @@ class Optimization:
             target=self.run_dashboard,
             daemon=True
         )
-        # self.user_interface.start()
+        self.user_interface.start()
 
     def run_dashboard(self):
         dashboard_port: int = self.application_container.settings.application().dashboard_port

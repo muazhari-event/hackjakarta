@@ -21,6 +21,13 @@
 - Direct frontend evaluation using reinforcement learning as real-user simulator. Metrics measured by how easy the agent "wants" to be fulfilled.
 - Auto system architecture search. Inspired by neural architecture search.
 
+### Tech Stack
+
+- Python
+- Golang
+- Langchain
+- Pymoo
+- OpenAI
 
 ### Usage
 1. Clone the repository
