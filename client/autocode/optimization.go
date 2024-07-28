@@ -163,7 +163,7 @@ func NewOptimizationChoice(name string, options []any) *OptimizationChoice {
 			option = &OptimizationFunctionValue{
 				Function:               option.(FunctionValue),
 				Complexity:             0,
-				ErrorPotential:         0,
+				ErrorPotentiality:      0,
 				Modularization:         0,
 				OverallMaintainability: 0,
 				Understandability:      0,
@@ -209,7 +209,7 @@ func (self *OptimizationValue) Map() (output map[string]any) {
 type FunctionValue = func(*OptimizationApplicationContext, ...any) any
 type OptimizationFunctionValue struct {
 	Function               FunctionValue
-	ErrorPotential         float64
+	ErrorPotentiality      float64
 	Understandability      float64
 	Complexity             float64
 	OverallMaintainability float64
@@ -346,6 +346,14 @@ func NewOptimization(
 		variableId := getFieldValue(variable, "Id").(string)
 		transformedVariables[variableId] = variable
 	}
+	interpreter := fast.New()
+	//interpreter.SetBuildArgs([]string{"-gcflags=all=-N -l"})
+	imports := `
+				import (
+					"../../autocode"
+				)
+				`
+	interpreter.Eval(imports)
 	optimization = &Optimization{
 		Variables:   transformedVariables,
 		Application: application,
@@ -357,7 +365,7 @@ func NewOptimization(
 		ClientUrl:   fmt.Sprintf("http://%s:%d", clientHost, clientPort),
 		ClientName:  clientName,
 		Workers:     workers,
-		Interpreter: fast.New(),
+		Interpreter: interpreter,
 	}
 
 	return optimization
@@ -423,20 +431,13 @@ func (self *Optimization) Prepare() {
 						functionNameSegments := strings.Split(data["name"].(string), ".")
 						functionName := functionNameSegments[len(functionNameSegments)-1]
 						functionString := data["string"].(string)
-						interpreter := fast.New()
-						imports := `
-						import (
-							"../autocode"
-						)
-						`
-						interpreter.Eval(imports)
-						interpreter.Eval(functionString)
-						function, _ := interpreter.Eval1(functionName)
+						self.Interpreter.Eval(functionString)
+						function, _ := self.Interpreter.Eval1(functionName)
 						newOptionData = &OptimizationFunctionValue{
 							Function:               function.Interface().(FunctionValue),
 							Complexity:             data["complexity"].(float64),
-							ErrorPotential:         data["error_potential"].(float64),
-							Modularization:         data["modularization"].(float64),
+							ErrorPotentiality:      data["error_potentiality"].(float64),
+							Modularization:         data["modularity"].(float64),
 							OverallMaintainability: data["overall_maintainability"].(float64),
 							Understandability:      data["understandability"].(float64),
 						}

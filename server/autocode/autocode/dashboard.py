@@ -51,11 +51,12 @@ def get_preparation_data():
         time.sleep(0.01)
 
 
+st.write(f"Current num of clients: {len(client_caches)}")
 objective_caches, client_caches = get_preparation_data()
 
 if len(objective_caches) == 0 and len(client_caches) == 0:
     st.write("Waiting for preparation data.")
-elif len(objective_caches) == 1 and len(client_caches) == 1:
+elif len(objective_caches) == 1 and len(client_caches) >= 1:
     objectives = dill.loads(objective_caches[0].value)
     for client_cache in client_caches:
         client: OptimizationClient = dill.loads(client_cache.value)

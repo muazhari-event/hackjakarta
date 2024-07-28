@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import re
 import uuid
 from typing import Dict, List, Callable, Any, Coroutine
 
@@ -7,18 +8,20 @@ import dill
 import numpy as np
 from langchain_core.output_parsers import PydanticToolsParser
 from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate, \
-    AIMessagePromptTemplate
+    AIMessagePromptTemplate, PromptTemplate, jinja2_formatter
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph
 from pymoo.algorithms.moo.sms import SMSEMOA
 from pymoo.core.algorithm import Algorithm
 from pymoo.core.callback import Callback
-from pymoo.core.mixed import MixedVariableSampling, MixedVariableMating, MixedVariableDuplicateElimination
+from pymoo.core.mixed import MixedVariableSampling, MixedVariableMating, MixedVariableDuplicateElimination, \
+    MixedVariableGA
 from pymoo.core.plot import Plot
 from pymoo.core.problem import ElementwiseProblem
 from pymoo.core.result import Result
 from pymoo.core.variable import Variable, Binary, Choice, Integer, Real
 from pymoo.decomposition.asf import ASF
+from pymoo.operators.survival.rank_and_crowding import RankAndCrowding
 from pymoo.optimize import minimize
 from pymoo.visualization.pcp import PCP
 from pymoo.visualization.scatter import Scatter
@@ -219,7 +222,7 @@ class LlmUseCase:
                         You are target group of our study. The target group of our study are software quality analysts, researchers with a background in software quality, and software engineers that are involved with maintaining software. Some participants have up to 15 years of experience in quality assessments. In sum, 70 professionals participated. First, we invited selected experts to participate in the study. Second, we asked them to disseminate the study to interested and qualified colleagues. The survey was also promoted in relevant networks. The participants are affiliated with companies including Airbus, Audi, BMW, Boston Consulting Group, Celonis, cesdo Software Quality GmbH, CQSE GmbH, Facebook, fortiss, itestra GmbH, Kinexon GmbH, MaibornWolff GmbH, Munich Re, Oracle, and three universities. However, 7 participants did not want to share their affiliation. During the study, we followed a systematic approach to assess software maintainability. The following steps were taken:
                         """),
                 HumanMessagePromptTemplate.from_template("""
-                        Analyze error potential, readability, understandability, complexity, modularity, and overall maintainability metrics of the following code.
+                        Analyze error potentiality, readability, understandability, complexity, modularity, and overall maintainability metrics of the following code.
                         You must use step by step comprehensive reasoning to explain your analysis.
                         <code>
                         {code}
@@ -230,14 +233,14 @@ class LlmUseCase:
                         """),
                 HumanMessagePromptTemplate.from_template("""
                         Based on your analysis and the provided code, score the code based on the following criteria:
-                        Error potential - this code is potentially error-prone;
+                        Error potentiality - this code is potentially error-prone;
                         Readability - this code is easy to read; 
                         Understandability - the semantic meaning of this code is clear; 
                         Complexity - this code is complex; 
                         Modularity  - this code should be broken into smaller pieces; 
                         Overall maintainability - overall, this code is maintainable. 
-                        The score scale from -1000000 (strongly agree) to 1000000 (strongly disagree).
-                        You must score in precision, i.e. 14952, -475.456, 757850, 584.58495, 3.141598, etc.
+                        The score scale from 1 (strongly agree) to 100 (strongly disagree).
+                        You must score in precision, i.e. 14, 47.456, 75, 58.58495, 3.141598, etc.
                         """),
             ])
             chain = prompt | chat.bind_tools(tools=tools) | parser
@@ -302,13 +305,13 @@ class LlmUseCase:
                 """),
                 HumanMessagePromptTemplate.from_template("""
                 Generate 1 variations of the following code using "CodeVariation" tools.
-                Do not change the function name and parameters.
+                Do not change the function parameters.
                 """),
             ])
             chain = prompt | chat.bind_tools(tools=tools) | parser
             response = chain.invoke({
                 "code": state["code"],
-                "analysis": state["analysis"]
+                "analysis": state["analysis"],
             })
             state["variation"] = response
             return state
@@ -332,7 +335,7 @@ class LlmUseCase:
 
     async def generate_function_variation(self, function: OptimizationValueFunction) -> List[CodeVariation]:
         state: VariationState = await self.variation_graph.ainvoke({
-            "code": function.string
+            "code": function.string,
         })
 
         return state["variation"]
@@ -383,7 +386,10 @@ class OptimizationUseCase:
             for variation in variations:
                 new_option_id: str = str(uuid.uuid4())
                 copied_function: OptimizationValueFunction = copy.deepcopy(function)
-                copied_function.string = variation.variation
+                new_function_name:str = "variation_" + uuid.uuid4().hex
+                copied_function.name = new_function_name
+                copied_function.string = re.sub(r"func (.+?)\(", "func " + new_function_name + "(",
+                                                variation.variation)
                 variable.options[new_option_id] = OptimizationValue(
                     id=new_option_id,
                     type="function",
@@ -403,7 +409,7 @@ class OptimizationUseCase:
         list_scores = asyncio.get_event_loop().run_until_complete(asyncio.gather(*list_scoring_futures))
         for function, score in zip(list_functions, list_scores):
             function.understandability = score[0].understandability
-            function.error_potential = score[0].error_potential
+            function.error_potentiality = score[0].error_potentiality
             function.readability = score[0].readability
             function.complexity = score[0].complexity
             function.modularity = score[0].modularity
@@ -515,10 +521,8 @@ class OptimizationUseCase:
             evaluator=evaluator,
         )
 
-        algorithm: SMSEMOA = SMSEMOA(
-            sampling=MixedVariableSampling(),
-            mating=MixedVariableMating(eliminate_duplicates=MixedVariableDuplicateElimination()),
-            eliminate_duplicates=MixedVariableDuplicateElimination(),
+        algorithm: MixedVariableGA = MixedVariableGA(
+            survival=RankAndCrowding()
         )
 
         callback: OptimizationCallback = OptimizationCallback(

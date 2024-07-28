@@ -24,7 +24,7 @@ class BaseModel(PydanticBaseModelV2):
 class CodeScoring(BaseModelV1):
     """
     Score code in based on the following statements:
-    Error Potential - this code is potentially error-prone;
+    Error Potentiality - this code is potentially error-prone;
     Readability - this code is easy to read;
     Understandability - the semantic meaning of this code is clear;
     Complexity - this code is complex;
@@ -33,7 +33,7 @@ class CodeScoring(BaseModelV1):
     The score scale from 1 (strongly agree) to 100 (strongly disagree).
     You must score in precision, i.e. 14.3, 47.456, 75.45, 58.58495, 3.141598, etc.
     """
-    error_potential: float = FieldV1(description="Error potential score.")
+    error_potentiality: float = FieldV1(description="Error potential score.")
     readability: float = FieldV1(description="Readability score.")
     understandability: float = FieldV1(description="Understandability score.")
     complexity: float = FieldV1(description="Complexity score.")
@@ -58,6 +58,7 @@ class VariationState(TypedDict):
     code: str
     analysis: str
     variation: List[CodeVariation]
+    new_function_name: str
 
 
 class OptimizationVariable(BaseModel):
@@ -76,12 +77,12 @@ class OptimizationVariable(BaseModel):
 class OptimizationValueFunction(BaseModel):
     name: str
     string: str
-    error_potential: Optional[int] = Field(default=None)
-    understandability: Optional[int] = Field(default=None)
-    complexity: Optional[int] = Field(default=None)
-    readability: Optional[int] = Field(default=None)
-    modularity: Optional[int] = Field(default=None)
-    overall_maintainability: Optional[int] = Field(default=None)
+    error_potentiality: Optional[float] = Field(default=None)
+    understandability: Optional[float] = Field(default=None)
+    complexity: Optional[float] = Field(default=None)
+    readability: Optional[float] = Field(default=None)
+    modularity: Optional[float] = Field(default=None)
+    overall_maintainability: Optional[float] = Field(default=None)
 
 
 class OptimizationValue(BaseModel):
