@@ -305,6 +305,7 @@ class LlmUseCase:
                 """),
                 HumanMessagePromptTemplate.from_template("""
                 Generate 1 variations of the following code using "CodeVariation" tools.
+                Ensure do not using libraries.
                 Do not change the function parameters.
                 """),
             ])

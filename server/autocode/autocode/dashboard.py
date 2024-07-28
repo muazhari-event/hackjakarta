@@ -33,26 +33,25 @@ if clear_cache:
     st.cache_resource.clear()
     st.session_state.clear()
 
+client_placeholder = st.empty()
 
-@st.cache_data
-def get_preparation_data():
-    while True:
-        try:
-            session: Session = one_datastore.get_session()
-            objective_caches = list(session.exec(select(Cache).where(Cache.key == "objectives")).all())
-            client_caches = list(session.exec(select(Cache).where(Cache.key.startswith("clients"))).all())
-            session.close()
-        except Exception as e:
-            print(e)
-            time.sleep(0.01)
-            continue
-        if len(objective_caches) > 0 and len(client_caches) > 0:
-            return objective_caches, client_caches
+while True:
+    try:
+        session: Session = one_datastore.get_session()
+        objective_caches = list(session.exec(select(Cache).where(Cache.key == "objectives")).all())
+        client_caches = list(session.exec(select(Cache).where(Cache.key.startswith("clients"))).all())
+        session.close()
+    except Exception as e:
+        print(e)
         time.sleep(0.01)
+        continue
+    with client_placeholder:
+        st.write("Number of clients:", len(client_caches))
 
+    if len(objective_caches) > 0 and len(client_caches) > 0:
+        break
+    time.sleep(0.01)
 
-st.write(f"Current num of clients: {len(client_caches)}")
-objective_caches, client_caches = get_preparation_data()
 
 if len(objective_caches) == 0 and len(client_caches) == 0:
     st.write("Waiting for preparation data.")
