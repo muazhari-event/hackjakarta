@@ -46,12 +46,10 @@ while True:
         time.sleep(0.01)
         continue
     with client_placeholder:
-        st.write("Number of clients:", len(client_caches))
-
-    if len(objective_caches) > 0 and len(client_caches) > 0:
+        st.write(f"Number of clients: {len(client_caches)}")
+    if len(objective_caches) > 0:
         break
     time.sleep(0.01)
-
 
 if len(objective_caches) == 0 and len(client_caches) == 0:
     st.write("Waiting for preparation data.")
@@ -68,6 +66,7 @@ elif len(objective_caches) == 1 and len(client_caches) >= 1:
             min_value=0.0,
             max_value=1.0,
             value=0.5,
+            key=f"weight_{index}"
         )
         weights.append(weight)
 else:

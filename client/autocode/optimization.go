@@ -164,7 +164,7 @@ func NewOptimizationChoice(name string, options []any) *OptimizationChoice {
 				Function:               option.(FunctionValue),
 				Complexity:             0,
 				ErrorPotentiality:      0,
-				Modularization:         0,
+				Modularity:             0,
 				OverallMaintainability: 0,
 				Understandability:      0,
 			}
@@ -213,7 +213,8 @@ type OptimizationFunctionValue struct {
 	Understandability      float64
 	Complexity             float64
 	OverallMaintainability float64
-	Modularization         float64
+	Modularity             float64
+	Readability            float64
 }
 
 func (self *OptimizationFunctionValue) GetName() (output string) {
@@ -437,9 +438,10 @@ func (self *Optimization) Prepare() {
 							Function:               function.Interface().(FunctionValue),
 							Complexity:             data["complexity"].(float64),
 							ErrorPotentiality:      data["error_potentiality"].(float64),
-							Modularization:         data["modularity"].(float64),
+							Modularity:             data["modularity"].(float64),
 							OverallMaintainability: data["overall_maintainability"].(float64),
 							Understandability:      data["understandability"].(float64),
+							Readability:            data["readability"].(float64),
 						}
 					} else {
 						panic(fmt.Sprintf("unsupported option type: %s", optionType))

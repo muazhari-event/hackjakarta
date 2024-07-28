@@ -76,9 +76,29 @@ func (self *Application) Evaluate(ctx *autocode.OptimizationApplicationContext) 
 	//if ctx.GetValue("f").(bool) {
 	//	f_sum_output += 1.0
 	//}
+	f_sum_understandability := float64(0)
+	f_sum_complexity := float64(0)
+	f_sum_readability := float64(0)
+	f_sum_error_potentiality := float64(0)
+	f_sum_overall_maintaianability := float64(0)
+
+	for variableId, variableValue := range ctx.VariableValues {
+		if variableValue.Type == autocode.VALUE_FUNCTION {
+			variable := ctx.Optimization.Variables[variableId]
+			choice := variable.(*autocode.
+				OptimizationChoice)
+			option := choice.Options[variableValue.Id]
+			function := option.Data.(*autocode.OptimizationFunctionValue)
+			f_sum_understandability += function.Understandability
+			f_sum_complexity += function.Complexity
+			f_sum_readability += function.Readability
+			f_sum_error_potentiality += function.ErrorPotentiality
+			f_sum_overall_maintaianability += function.OverallMaintainability
+		}
+	}
 
 	return &autocode.OptimizationEvaluateRunResponse{
-		Objectives:            []float64{f_sum_latency, f_sum_output},
+		Objectives:            []float64{f_sum_latency, f_sum_output, f_sum_understandability, f_sum_complexity, f_sum_readability, f_sum_error_potentiality, f_sum_overall_maintaianability},
 		InequalityConstraints: []float64{},
 		EqualityConstraints:   []float64{},
 	}
