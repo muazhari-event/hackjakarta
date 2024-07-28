@@ -13,9 +13,11 @@
 > ### Auto Code Improvement by User Experience and Technical Metrics Optimization
 > We propose to improve the user experience and technical metrics of Grab applications. Specifically, we improve user experience and technical metrics using generative AI. Based on our research/literature review, our project hypothetically can contribute to the user experience and economic performance of the company.
 
-### Project Scope
-- User Experience Metrics: Error Potential, Latency.
-- Technical Metrics: Throughput.
+### Project Scope*
+- User Experience Metrics: Error Potentiality, Latency.
+- Technical Metrics: Code Quality.
+
+*Can be extended to other metrics, like throughput.
 
 ### Project Future Roadmap
 - Direct frontend evaluation using reinforcement learning as real-user simulator. Metrics measured by how easy the agent "wants" to be fulfilled.
@@ -31,13 +33,13 @@
 
 ### Usage
 1. Clone the repository
-2. Change directory to `./example/app_1` and `./example/app_2`
+2. Change directory to `./client/app_product`
 3. Run `go mod tidy` to install dependencies.
-4. Change directory to `./example`
-5. Run `pip install -r requirements.txt` to install dependencies.
-6. Run cell for `optimization` instantiation in `./example/controller.ipynb`
-7. Run `go test ./test` in app_1 and app_2 working directory.
-8. Run cell for `optimization.run()` in `./example/controller.ipynb` to start the optimization process.
+4. Change directory to `./server/autocode/example`
+5. Run `pip install .` to install dependencies.
+6. Run cell for `optimization` instantiation in `./server/autocode/example.ipynb`
+7. Run `go test ./test` in app_product working directory.
+8. Run cell for `optimization.run()` in `./server/autocode/example.ipynb` to start the optimization process.
 9. Open dashboard in `http://localhost:{dashboard_port}` to see the optimization process in real-time.
 10. Wait until the optimization process is finished.
 11. Decide the best solution from the optimization process result.
