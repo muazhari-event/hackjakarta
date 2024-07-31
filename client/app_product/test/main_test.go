@@ -29,12 +29,12 @@ func NewApplication(t *testing.T) *Application {
 func (self *Application) Duplicate(ctx *autocode.OptimizationApplicationContext) any {
 	container := src.NewMainContainer()
 	container.Datastore.One.Products = []*src.Product{
-		&src.Product{
+		{
 			Id:    "id1",
 			Name:  "name1",
 			Price: 1.0,
 		},
-		&src.Product{
+		{
 			Id:    "id2",
 			Name:  "name2",
 			Price: 2.0,

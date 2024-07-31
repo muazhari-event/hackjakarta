@@ -559,10 +559,10 @@ class OptimizationUseCase:
         return result
 
     def get_decision_index(self, result: Result, weights: List[float]) -> int:
-        weights = np.asarray(weights)
+        weights = np.asarray(weights, dtype=np.float64)
         sum_weights = np.sum(weights)
 
-        normalized_weights = weights / sum_weights if sum_weights != 0 else np.ones(weights) / len(weights)
+        normalized_weights = weights / sum_weights if sum_weights != 0 else np.ones_like(weights) / len(weights)
         normalized_weights[normalized_weights == 0] += np.finfo(normalized_weights.dtype).eps
 
         ideal_point = np.min(result.F, axis=0)

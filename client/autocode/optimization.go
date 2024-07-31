@@ -412,8 +412,7 @@ func (self *Optimization) Prepare() {
 		panic(decodeErr)
 	}
 
-	for _, newVariable := range responseBody.Variables {
-		newVariableId := newVariable.(map[string]any)["id"].(string)
+	for newVariableId, newVariable := range responseBody.Variables {
 		newVariableType := newVariable.(map[string]any)["type"].(string)
 		newVariableName := newVariable.(map[string]any)["name"].(string)
 		oldVariable, _ := self.Variables[newVariableId]
@@ -422,35 +421,41 @@ func (self *Optimization) Prepare() {
 			newOptions := map[string]*OptimizationValue{}
 			for optionId, option := range newVariable.(map[string]any)["options"].(map[string]any) {
 				oldOption, isExists := oldOptions[optionId]
-				if isExists == true {
-					newOptions[optionId] = oldOption
-				} else {
-					optionType := option.(map[string]any)["type"].(string)
-					var newOptionData any
-					if optionType == VALUE_FUNCTION {
-						data := option.(map[string]any)["data"].(map[string]any)
-						splitFunctionName := strings.Split(data["name"].(string), ".")
+				optionType := option.(map[string]any)["type"].(string)
+				optionData := option.(map[string]any)["data"].(map[string]any)
+				if optionType == VALUE_FUNCTION {
+					if isExists == true {
+						oldOptionData := oldOption.Data.(*OptimizationFunctionValue)
+						oldOptionData.ErrorPotentiality = optionData["error_potentiality"].(float64)
+						oldOptionData.Complexity = optionData["complexity"].(float64)
+						oldOptionData.Modularity = optionData["modularity"].(float64)
+						oldOptionData.OverallMaintainability = optionData["overall_maintainability"].(float64)
+						oldOptionData.Understandability = optionData["understandability"].(float64)
+						oldOptionData.Readability = optionData["readability"].(float64)
+						newOptions[optionId] = oldOption
+					} else {
+						splitFunctionName := strings.Split(optionData["name"].(string), ".")
 						functionName := splitFunctionName[len(splitFunctionName)-1]
-						functionString := data["string"].(string)
+						functionString := optionData["string"].(string)
 						self.Interpreter.Eval(functionString)
 						function, _ := self.Interpreter.Eval1(functionName)
-						newOptionData = &OptimizationFunctionValue{
+						newOptionData := &OptimizationFunctionValue{
 							Function:               function.Interface().(FunctionValue),
-							Complexity:             data["complexity"].(float64),
-							ErrorPotentiality:      data["error_potentiality"].(float64),
-							Modularity:             data["modularity"].(float64),
-							OverallMaintainability: data["overall_maintainability"].(float64),
-							Understandability:      data["understandability"].(float64),
-							Readability:            data["readability"].(float64),
+							ErrorPotentiality:      optionData["error_potentiality"].(float64),
+							Complexity:             optionData["complexity"].(float64),
+							Modularity:             optionData["modularity"].(float64),
+							OverallMaintainability: optionData["overall_maintainability"].(float64),
+							Understandability:      optionData["understandability"].(float64),
+							Readability:            optionData["readability"].(float64),
 						}
-					} else {
-						panic(fmt.Sprintf("unsupported option type: %s", optionType))
+						newOptions[optionId] = &OptimizationValue{
+							Id:   optionId,
+							Type: optionType,
+							Data: newOptionData,
+						}
 					}
-					newOptions[optionId] = &OptimizationValue{
-						Id:   optionId,
-						Type: optionType,
-						Data: newOptionData,
-					}
+				} else {
+					newOptions[optionId] = oldOption
 				}
 			}
 			newChoice := &OptimizationChoice{

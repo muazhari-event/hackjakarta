@@ -1,4 +1,5 @@
 import time
+from math import ceil
 from typing import List, Dict, Any, Set
 
 import dill
@@ -45,10 +46,13 @@ while True:
         print(e)
         time.sleep(0.01)
         continue
+
     with client_placeholder:
-        st.write(f"Number of clients: {len(client_caches)}")
+        st.subheader(f"Number of clients: {len(client_caches)}")
+
     if len(objective_caches) > 0:
         break
+
     time.sleep(0.01)
 
 if len(objective_caches) == 0 and len(client_caches) == 0:
@@ -61,8 +65,15 @@ elif len(objective_caches) == 1 and len(client_caches) >= 1:
         variables.update(client.variables)
     for index, objective in enumerate(objectives):
         st.subheader(f"Objective {index + 1}")
+        st.radio(
+            label="Type",
+            options=[objective.type],
+            index=0,
+            horizontal=True,
+            key=f"type_{index}"
+        )
         weight: float = st.slider(
-            label=f"{objective}",
+            label=f"Weight",
             min_value=0.0,
             max_value=1.0,
             value=0.5,
@@ -84,13 +95,23 @@ while True:
         session: Session = one_datastore.get_session()
         query = select(Cache).where(Cache.key.startswith("results"))
         result_caches: Set[Cache] = set(session.exec(query).all())
-        diff_result_caches = set(result_caches) - set(st.session_state["old_result_caches"])
+        diff_result_caches = result_caches - st.session_state["old_result_caches"]
     except Exception as e:
         print(e)
         time.sleep(0.01)
         continue
 
-    for cache in diff_result_caches:
+    if len(diff_result_caches) == 0:
+        to_display_indexes = []
+    else:
+        n: int = 10
+        to_display_indexes = list(range(len(diff_result_caches)))[::int(ceil(len(diff_result_caches) / n))]
+
+    for index, cache in enumerate(diff_result_caches):
+        if index not in to_display_indexes:
+            st.session_state["old_result_caches"].add(cache)
+            continue
+
         result: Result = dill.loads(cache.value)
 
         if result.F.ndim == 1:

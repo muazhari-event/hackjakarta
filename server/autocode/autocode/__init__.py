@@ -1,4 +1,3 @@
-import asyncio
 import os
 import sys
 from http import HTTPStatus
@@ -8,7 +7,7 @@ from typing import Callable, Any, Dict, List
 import ray
 import uvicorn
 from fastapi import FastAPI
-from httpx import AsyncClient, Client
+from httpx import Client
 from pymoo.core.result import Result
 from sqlmodel import SQLModel
 from starlette.middleware.cors import CORSMiddleware
