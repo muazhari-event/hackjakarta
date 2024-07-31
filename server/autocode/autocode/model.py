@@ -5,10 +5,9 @@ from typing import Optional, Any, List, Dict, Tuple, TypedDict
 import dill
 import numpy as np
 from pydantic import BaseModel as PydanticBaseModelV2, ConfigDict, Field, PrivateAttr
+from pydantic.v1 import BaseModel as BaseModelV1, Field as FieldV1
 from pymoo.core.plot import Plot
 from sqlmodel import SQLModel, Field as SQLField
-
-from pydantic.v1 import BaseModel as BaseModelV1, Field as FieldV1
 
 
 class BaseModel(PydanticBaseModelV2):
@@ -93,9 +92,7 @@ class OptimizationValue(BaseModel):
     @staticmethod
     def convert_type(data: Any):
         data_type = type(data)
-        if data_type == np.ndarray:
-            return data.tolist()
-        elif data_type == np.float64:
+        if data_type == np.float64:
             return float(data)
         elif data_type == np.int64:
             return int(data)
@@ -106,11 +103,10 @@ class OptimizationValue(BaseModel):
 
     def __init__(self, **data):
         data["data"] = self.convert_type(data["data"])
-        if data["type"] == "function":
+        if data.get("type", None) == OptimizationValueFunction.__name__:
             if type(data["data"]) != OptimizationValueFunction:
                 data["data"] = OptimizationValueFunction(**data["data"])
-        else:
-            data["type"] = type(data["data"]).__name__
+        data["type"] = type(data["data"]).__name__
         super().__init__(**data)
 
 
@@ -183,13 +179,6 @@ class OptimizationEvaluateRunResponse(BaseModel):
     objectives: List[float]
     inequality_constraints: List[float]
     equality_constraints: List[float]
-    _client: Optional[OptimizationClient] = PrivateAttr(default=None)
-
-    def set_client(self, client: OptimizationClient):
-        self._client = client
-
-    def get_client(self) -> OptimizationClient:
-        return self._client
 
 
 class OptimizationInterpretation(BaseModel):

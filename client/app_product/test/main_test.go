@@ -48,7 +48,9 @@ func (self *Application) Duplicate(ctx *autocode.OptimizationApplicationContext)
 	}
 }
 
-func (self *Application) TestSearchMany(*testing.T) {
+func (self *Application) TestSearchMany(t *testing.T) {
+	t.Parallel()
+
 	url := self.Server.URL + "/products/searches?keyword=name1&topK=1"
 	response, _ := http.Get(url)
 	assert.Equal(self.Test, http.StatusOK, response.StatusCode)
@@ -61,11 +63,10 @@ func (self *Application) TestSearchMany(*testing.T) {
 }
 
 func (self *Application) Evaluate(ctx *autocode.OptimizationApplicationContext) *autocode.OptimizationEvaluateRunResponse {
-
-	f_sum_latency := float64(0)
 	t0 := time.Now()
 	self.Test.Run("TestSearchMany", self.TestSearchMany)
 	t1 := time.Now()
+	f_sum_latency := float64(0)
 	f_sum_latency += float64(t1.Sub(t0).Microseconds())
 	f_sum_output := float64(0)
 	f_sum_output += float64(ctx.GetValue("a").(int64))
@@ -81,12 +82,12 @@ func (self *Application) Evaluate(ctx *autocode.OptimizationApplicationContext) 
 	f_sum_readability := float64(0)
 	f_sum_error_potentiality := float64(0)
 	f_sum_overall_maintaianability := float64(0)
+	variable_function_count := float64(0)
 
 	for variableId, variableValue := range ctx.VariableValues {
 		if variableValue.Type == autocode.VALUE_FUNCTION {
 			variable := ctx.Optimization.Variables[variableId]
-			choice := variable.(*autocode.
-				OptimizationChoice)
+			choice := variable.(*autocode.OptimizationChoice)
 			option := choice.Options[variableValue.Id]
 			function := option.Data.(*autocode.OptimizationFunctionValue)
 			f_sum_understandability += function.Understandability
@@ -94,11 +95,17 @@ func (self *Application) Evaluate(ctx *autocode.OptimizationApplicationContext) 
 			f_sum_readability += function.Readability
 			f_sum_error_potentiality += function.ErrorPotentiality
 			f_sum_overall_maintaianability += function.OverallMaintainability
+			variable_function_count += 1
 		}
 	}
 
 	return &autocode.OptimizationEvaluateRunResponse{
-		Objectives:            []float64{f_sum_latency, f_sum_output, f_sum_understandability, f_sum_complexity, f_sum_readability, f_sum_error_potentiality, f_sum_overall_maintaianability},
+		Objectives: []float64{
+			f_sum_latency, f_sum_output,
+			f_sum_understandability / variable_function_count, f_sum_complexity / variable_function_count,
+			f_sum_readability / variable_function_count, f_sum_error_potentiality / variable_function_count,
+			f_sum_overall_maintaianability / variable_function_count,
+		},
 		InequalityConstraints: []float64{},
 		EqualityConstraints:   []float64{},
 	}

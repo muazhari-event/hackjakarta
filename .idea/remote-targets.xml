@@ -10,7 +10,7 @@
         <ContributedStateBase type="GoLanguageRuntime">
           <config>
             <option name="goPath" value="/home/muazhari/go" />
-            <option name="goRoot" value="/usr/bin/go" />
+            <option name="goRoot" value="/usr/local/go/bin/go" />
             <option name="goVersion" value="go1.22.5 linux/amd64" />
           </config>
         </ContributedStateBase>

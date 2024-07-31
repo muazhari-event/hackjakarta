@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/cosmos72/gomacro/fast"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"github.com/muazhari/gomacro-custom/fast"
 	"github.com/valyala/fasthttp"
 	"github.com/valyala/fasthttp/fasthttpadaptor"
 	"go/ast"
@@ -25,7 +25,7 @@ const VARIABLE_BINARY = "OptimizationBinary"
 const VARIABLE_INTEGER = "OptimizationInteger"
 const VARIABLE_REAL = "OptimizationReal"
 const VARIABLE_CHOICE = "OptimizationChoice"
-const VALUE_FUNCTION = "function"
+const VALUE_FUNCTION = "OptimizationValueFunction"
 const VALUE_BOOLEAN = "bool"
 const VALUE_INTEGER = "int"
 const VALUE_FLOAT = "float"
@@ -348,7 +348,7 @@ func NewOptimization(
 		transformedVariables[variableId] = variable
 	}
 	interpreter := fast.New()
-	//interpreter.SetBuildArgs([]string{"-gcflags=all=-N -l"})
+	interpreter.SetBuildArgs([]string{"-gcflags=all=-N -l"})
 	imports := `
 				import (
 					"../../autocode"
@@ -429,8 +429,8 @@ func (self *Optimization) Prepare() {
 					var newOptionData any
 					if optionType == VALUE_FUNCTION {
 						data := option.(map[string]any)["data"].(map[string]any)
-						functionNameSegments := strings.Split(data["name"].(string), ".")
-						functionName := functionNameSegments[len(functionNameSegments)-1]
+						splitFunctionName := strings.Split(data["name"].(string), ".")
+						functionName := splitFunctionName[len(splitFunctionName)-1]
 						functionString := data["string"].(string)
 						self.Interpreter.Eval(functionString)
 						function, _ := self.Interpreter.Eval1(functionName)
@@ -495,20 +495,20 @@ func (self *Optimization) StartClientServer() {
 }
 
 func (self *Optimization) EvaluatePrepare(writer http.ResponseWriter, reader *http.Request) {
-	responseBody := &OptimizationEvaluatePrepareRequest{}
-	decodeErr := json.NewDecoder(reader.Body).Decode(responseBody)
+	requestBody := &OptimizationEvaluatePrepareRequest{}
+	decodeErr := json.NewDecoder(reader.Body).Decode(requestBody)
 	if decodeErr != nil {
 		panic(decodeErr)
 	}
 
-	worker := self.Workers[responseBody.WorkerId]
-	worker.VariableValues = responseBody.VariableValues
+	worker := self.Workers[requestBody.WorkerId]
+	worker.VariableValues = requestBody.VariableValues
 	worker.ExecutedVariableValues = map[string]any{}
 }
 
 func (self *Optimization) EvaluateRun(writer http.ResponseWriter, reader *http.Request) {
-	responseBody := &OptimizationEvaluateRunRequest{}
-	decodeErr := json.NewDecoder(reader.Body).Decode(responseBody)
+	requestBody := &OptimizationEvaluateRunRequest{}
+	decodeErr := json.NewDecoder(reader.Body).Decode(requestBody)
 	if decodeErr != nil {
 		responseBodyBytes, _ := io.ReadAll(reader.Body)
 		log.Println(fmt.Sprintf("failed to decode request body: %s", string(responseBodyBytes)))
@@ -516,7 +516,7 @@ func (self *Optimization) EvaluateRun(writer http.ResponseWriter, reader *http.R
 		panic(decodeErr)
 	}
 
-	worker := self.Workers[responseBody.WorkerId]
+	worker := self.Workers[requestBody.WorkerId]
 	evaluation := worker.Application.Evaluate(worker)
 
 	encodeErr := json.NewEncoder(writer).Encode(evaluation)

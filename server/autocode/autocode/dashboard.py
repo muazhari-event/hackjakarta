@@ -93,7 +93,7 @@ while True:
     for cache in diff_result_caches:
         result: Result = dill.loads(cache.value)
 
-        if type(result.F) != np.ndarray or result.F.ndim == 1:
+        if result.F.ndim == 1:
             result.F = np.array([result.F])
 
         decision_index: int = optimization_use_case.get_decision_index(
@@ -124,13 +124,12 @@ while True:
                 client: OptimizationClient = clients[variable.get_client_id()]
                 if type(variable_value) is not OptimizationValue:
                     value: OptimizationValue = OptimizationValue(
-                        type=type(variable_value).__name__,
                         data=variable_value
                     )
                 else:
                     value: OptimizationValue = variable_value
 
-                if value.type == "function":
+                if value.type == "OptimizationValueFunction":
                     variable_value = value.data.model_dump(mode="python")
                 else:
                     variable_value = value.data

@@ -86,11 +86,11 @@ class Optimization:
                 print("Server is healthy.")
                 break
 
-        self.user_interface: Process = Process(
+        self.dashboard: Process = Process(
             target=self.run_dashboard,
             daemon=True
         )
-        self.user_interface.start()
+        self.dashboard.start()
 
     def run_dashboard(self):
         dashboard_port: int = self.application_container.settings.application().dashboard_port

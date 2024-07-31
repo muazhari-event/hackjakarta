@@ -6,25 +6,25 @@ from typing import Dict, List, Callable, Any, Coroutine
 
 import dill
 import numpy as np
+import ray
 from langchain_core.output_parsers import PydanticToolsParser
 from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate, \
-    AIMessagePromptTemplate, PromptTemplate, jinja2_formatter
+    AIMessagePromptTemplate
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph
 from pymoo.algorithms.moo.sms import SMSEMOA
 from pymoo.core.algorithm import Algorithm
 from pymoo.core.callback import Callback
-from pymoo.core.mixed import MixedVariableSampling, MixedVariableMating, MixedVariableDuplicateElimination, \
-    MixedVariableGA
+from pymoo.core.mixed import MixedVariableSampling, MixedVariableMating, MixedVariableDuplicateElimination
 from pymoo.core.plot import Plot
 from pymoo.core.problem import ElementwiseProblem
 from pymoo.core.result import Result
 from pymoo.core.variable import Variable, Binary, Choice, Integer, Real
 from pymoo.decomposition.asf import ASF
-from pymoo.operators.survival.rank_and_crowding import RankAndCrowding
 from pymoo.optimize import minimize
 from pymoo.visualization.pcp import PCP
 from pymoo.visualization.scatter import Scatter
+from ray.util.queue import Queue
 from sqlalchemy import delete
 from sqlmodel import Session, SQLModel, select
 
@@ -33,11 +33,9 @@ from autocode.gateway import EvaluationGateway
 from autocode.model import OptimizationPrepareRequest, OptimizationChoice, OptimizationBinary, \
     OptimizationInteger, OptimizationReal, OptimizationVariable, OptimizationClient, OptimizationEvaluateRunRequest, \
     OptimizationValue, OptimizationEvaluatePrepareRequest, OptimizationEvaluateRunResponse, OptimizationObjective, \
-    OptimizationInterpretation, OptimizationPrepareResponse, Cache, OptimizationValueFunction, CodeScoring, \
+    OptimizationPrepareResponse, Cache, OptimizationValueFunction, CodeScoring, \
     ScoringState, CodeVariation, VariationState
 from autocode.setting import ApplicationSetting
-
-from ray.util.queue import Queue
 
 
 class OptimizationCallback(Callback):
@@ -69,24 +67,22 @@ class OptimizationProblem(ElementwiseProblem):
             self,
             application_setting: ApplicationSetting,
             optimization_gateway: EvaluationGateway,
-            num_objectives: int,
-            num_inequality_constraints: int,
-            num_equality_constraints: int,
+            objectives: List[OptimizationObjective],
             variables: Dict[str, OptimizationBinary | OptimizationChoice | OptimizationInteger | OptimizationReal],
             clients: Dict[str, OptimizationClient],
             evaluator: Callable[[List[OptimizationEvaluateRunResponse]], Dict[str, Any]],
+            *args,
+            **kwargs
     ):
         self.application_setting = application_setting
         self.optimization_gateway = optimization_gateway
+        self.objectives = objectives
         self.variables = variables
         self.clients = clients
         self.evaluator = evaluator
         self.queue = Queue()
         for i in range(self.application_setting.num_cpus):
             self.queue.put(str(i))
-        self.num_objectives = num_objectives
-        self.num_inequality_constraints = num_inequality_constraints
-        self.num_equality_constraints = num_equality_constraints
         self.vars: Dict[str, Variable] = {}
         for variable_id, variable in variables.items():
             variable_type = type(variable)
@@ -103,9 +99,8 @@ class OptimizationProblem(ElementwiseProblem):
 
         super().__init__(
             n_var=len(self.vars),
-            n_obj=num_objectives,
-            n_ieq_constr=num_inequality_constraints,
-            n_eq_constr=num_equality_constraints
+            *args,
+            **kwargs
         )
 
     def _evaluate(self, X, out, *args, **kwargs):
@@ -116,13 +111,12 @@ class OptimizationProblem(ElementwiseProblem):
             value: Any = X[variable_id]
             if type(value) is not OptimizationValue:
                 value: OptimizationValue = OptimizationValue(
-                    type=type(value).__name__,
                     data=value
                 )
             else:
                 value: OptimizationValue = value
 
-            if client_to_variable_values.get(variable.get_client_id()) is None:
+            if client_to_variable_values.get(variable.get_client_id(), None) is None:
                 client_to_variable_values[variable.get_client_id()] = {}
             client_to_variable_values[variable.get_client_id()][variable_id] = value
 
@@ -158,22 +152,23 @@ class OptimizationProblem(ElementwiseProblem):
 
         self.queue.put(worker_id)
 
-        for result, client in zip(results, self.clients.values()):
-            result.set_client(client)
-
         evaluator_output: Dict[str, Any] = self.evaluator(results)
         evaluator_output.setdefault("F", [])
         evaluator_output.setdefault("G", [])
         evaluator_output.setdefault("H", [])
 
-        if len(evaluator_output["F"]) != self.num_objectives:
-            raise ValueError(f"Number of objectives {len(evaluator_output['F'])} does not match {self.num_objectives}.")
-        if len(evaluator_output["G"]) != self.num_inequality_constraints:
+        if len(evaluator_output["F"]) != self.n_obj:
+            raise ValueError(f"Number of objectives {len(evaluator_output['F'])} does not match {self.n_obj}.")
+        if len(evaluator_output["G"]) != self.n_ieq_constr:
             raise ValueError(
-                f"Number of inequality constraints {len(evaluator_output['G'])} does not match {self.num_inequality_constraints}.")
-        if len(evaluator_output["H"]) != self.num_equality_constraints:
+                f"Number of inequality constraints {len(evaluator_output['G'])} does not match {self.n_ieq_constr}.")
+        if len(evaluator_output["H"]) != self.n_eq_constr:
             raise ValueError(
-                f"Number of equality constraints {len(evaluator_output['H'])} does not match {self.num_equality_constraints}.")
+                f"Number of equality constraints {len(evaluator_output['H'])} does not match {self.n_eq_constr}.")
+
+        for index, objective in enumerate(self.objectives):
+            if objective.type == "maximize":
+                evaluator_output["F"][index] = -evaluator_output["F"][index]
 
         out.update(evaluator_output)
 
@@ -342,6 +337,20 @@ class LlmUseCase:
         return state["variation"]
 
 
+class OptimizationProblemRunner:
+    def __init__(self):
+        pass
+
+    def __call__(self, f, X):
+        runnable = ray.remote(f.__call__.__func__)
+        futures = [runnable.remote(f, x) for x in X]
+        return ray.get(futures)
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        return state
+
+
 class OptimizationUseCase:
     def __init__(
             self,
@@ -372,7 +381,7 @@ class OptimizationUseCase:
 
             if type(variable) is OptimizationChoice:
                 for option_id, option in variable.options.items():
-                    if option.type == "function":
+                    if option.type == "OptimizationValueFunction":
                         function: OptimizationValueFunction = option.data
                         future_variation: Coroutine = self.llm_use_case.generate_function_variation(function)
                         list_variation_futures.append(future_variation)
@@ -387,13 +396,17 @@ class OptimizationUseCase:
             for variation in variations:
                 new_option_id: str = str(uuid.uuid4())
                 copied_function: OptimizationValueFunction = copy.deepcopy(function)
-                new_function_name:str = "variation_" + uuid.uuid4().hex
-                copied_function.name = new_function_name
-                copied_function.string = re.sub(r"func (.+?)\(", "func " + new_function_name + "(",
-                                                variation.variation)
+                new_function_name: str = "variation_" + uuid.uuid4().hex
+                split_function_name = copied_function.name.split(".")
+                split_function_name[-1] = new_function_name
+                copied_function.name = ".".join(split_function_name)
+                copied_function.string = re.sub(
+                    pattern=r"func (.+?)\(",
+                    repl="func " + new_function_name + "(",
+                    string=variation.variation
+                )
                 variable.options[new_option_id] = OptimizationValue(
                     id=new_option_id,
-                    type="function",
                     data=copied_function
                 )
 
@@ -401,11 +414,11 @@ class OptimizationUseCase:
         list_scoring_futures: List[Coroutine] = []
         for variable_id, variable in client.variables.items():
             if type(variable) is OptimizationChoice:
-                for option_id, function in variable.options.items():
-                    if function.type == "function":
-                        future_scoring: Coroutine = self.llm_use_case.function_scoring(function.data)
+                for option_id, option in variable.options.items():
+                    if option.type == "OptimizationValueFunction":
+                        future_scoring: Coroutine = self.llm_use_case.function_scoring(option.data)
                         list_scoring_futures.append(future_scoring)
-                        list_functions.append(function.data)
+                        list_functions.append(option.data)
 
         list_scores = asyncio.get_event_loop().run_until_complete(asyncio.gather(*list_scoring_futures))
         for function, score in zip(list_functions, list_scores):
@@ -464,6 +477,7 @@ class OptimizationUseCase:
             session.add(objective_cache)
         elif len(objective_caches) == 1:
             objective_caches[0].value = dill.dumps(objectives)
+            session.add(objective_caches[0])
         else:
             raise ValueError(f"Number of objectives {len(objective_caches)} is not supported.")
 
@@ -491,13 +505,11 @@ class OptimizationUseCase:
         plot_0 = Scatter()
         plot_0.add(result.F, color="blue")
         plot_0.add(result.F[decision_index], color="green")
-        plot_0.title = "Scatter"
         plot_0.show()
 
         plot_1 = PCP()
         plot_1.add(result.F, color="blue")
         plot_1.add(result.F[decision_index], color="green")
-        plot_1.title = "Parallel Coordinate"
         plot_1.show()
 
         return [plot_0, plot_1]
@@ -511,19 +523,25 @@ class OptimizationUseCase:
             evaluator: Callable[[List[OptimizationEvaluateRunResponse]], Dict[str, Any]],
             clients: Dict[str, OptimizationClient],
     ) -> Result:
+        runner: OptimizationProblemRunner = OptimizationProblemRunner()
+
         problem = OptimizationProblem(
             application_setting=self.application_setting,
             optimization_gateway=self.evaluation_gateway,
-            num_objectives=len(objectives),
-            num_inequality_constraints=num_inequality_constraints,
-            num_equality_constraints=num_equality_constraints,
+            objectives=objectives,
             variables=variables,
             clients=clients,
             evaluator=evaluator,
+            n_obj=len(objectives),
+            n_ieq_constr=num_inequality_constraints,
+            n_eq_constr=num_equality_constraints,
+            elementwise_runner=runner
         )
 
-        algorithm: MixedVariableGA = MixedVariableGA(
-            survival=RankAndCrowding()
+        algorithm: SMSEMOA = SMSEMOA(
+            sampling=MixedVariableSampling(),
+            mating=MixedVariableMating(eliminate_duplicates=MixedVariableDuplicateElimination()),
+            eliminate_duplicates=MixedVariableDuplicateElimination(),
         )
 
         callback: OptimizationCallback = OptimizationCallback(

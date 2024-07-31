@@ -2,12 +2,10 @@ module autocode
 
 go 1.22.5
 
-replace github.com/cosmos72/gomacro => ../../../gomacro
-
 require (
-	github.com/cosmos72/gomacro v0.0.0-20240506194242-2ff796e3da10
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
+	github.com/muazhari/gomacro-custom v0.0.0-20240731093833-a6136ef7aaa6
 	github.com/valyala/fasthttp v1.55.0
 )
 
