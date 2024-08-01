@@ -459,6 +459,7 @@ class OptimizationUseCase:
         variables: Dict[str, OptimizationBinary | OptimizationChoice | OptimizationInteger | OptimizationReal] = {}
         session: Session = self.one_datastore.get_session()
         session.exec(delete(Cache).where(Cache.key.startswith("results")))
+        session.exec(delete(Cache).where(Cache.key == "objectives"))
 
         client_caches = list(session.exec(select(Cache).where(Cache.key.startswith("clients"))).all())
         objective_caches = list(session.exec(select(Cache).where(Cache.key == "objectives")).all())
@@ -475,11 +476,8 @@ class OptimizationUseCase:
                 value=dill.dumps(objectives)
             )
             session.add(objective_cache)
-        elif len(objective_caches) == 1:
-            objective_caches[0].value = dill.dumps(objectives)
-            session.add(objective_caches[0])
         else:
-            raise ValueError(f"Number of objectives {len(objective_caches)} is not supported.")
+            raise ValueError(f"Number of objectives caches must be 0, but got {len(objective_caches)}.")
 
         session.commit()
         session.close()

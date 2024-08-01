@@ -1,11 +1,11 @@
-package app_1
+package src
 
 type OneDatastore struct {
-	Accounts []*Account
+	Products []*Product
 }
 
 func NewOneDatastore() *OneDatastore {
 	return &OneDatastore{
-		Accounts: make([]*Account, 0),
+		Products: make([]*Product, 0),
 	}
 }
