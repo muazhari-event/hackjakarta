@@ -35,7 +35,7 @@
 1. Clone the repository
 2. Change directory to `./client/app_product`
 3. Run `go mod tidy` to install dependencies.
-4. Change directory to `./server/autocode/example`
+4. Change directory to `./server/autocode`
 5. Run `pip install .` to install dependencies.
 6. Run cell for `optimization` instantiation in `./server/autocode/example.ipynb`
 7. Run `go test ./test` in app_product working directory.
